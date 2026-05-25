@@ -1,6 +1,11 @@
 package asl
 
-import "github.com/serverledge-faas/serverledge/internal/types"
+import (
+	"fmt"
+
+	"github.com/buger/jsonparser"
+	"github.com/serverledge-faas/serverledge/internal/types"
+)
 
 type ParallelState struct {
 	Type     StateType
@@ -41,8 +46,58 @@ func NewEmptyParallel() *ParallelState {
 }
 
 func (p *ParallelState) ParseFrom(jsonData []byte) (State, error) {
-	//TODO implement me
-	panic("implement me")
+
+	p.Next = JsonExtractStringOrDefault(jsonData, "Next", "")
+
+	p.End = JsonExtractBool(jsonData, "End")
+
+	branchesData, errBranches := JsonExtract(jsonData, "Branches")
+	if errBranches != nil {
+		return nil, fmt.Errorf("failed to parse Branches %v", branchesData)
+	}
+
+	var parseErr error
+
+	_, err := jsonparser.ArrayEach(branchesData, func(value []byte, dataType jsonparser.ValueType, offset int, cbErr error) {
+		if parseErr != nil {
+			return
+		}
+
+		if cbErr != nil {
+			parseErr = fmt.Errorf("malformed JSON at offset %d: %w", offset, cbErr)
+			return
+		}
+
+		branchSM := &StateMachine{}
+
+		branchSM.StartAt = JsonExtractStringOrDefault(value, "StartAt", "")
+		if branchSM.StartAt == "" {
+			parseErr = fmt.Errorf("missing StartAt field within a branch")
+			return
+		}
+
+		statesData := JsonExtractStringOrDefault(value, "States", "")
+
+		statesMap, errStates := parseStates(statesData)
+		if errStates != nil {
+			parseErr = fmt.Errorf("failed to parse States key: %v", errStates)
+			return
+		}
+
+		branchSM.States = statesMap
+
+		p.Branches = append(p.Branches, branchSM)
+	})
+
+	if err != nil {
+		return nil, fmt.Errorf("failed to read the branches array: %w", err)
+	}
+
+	if parseErr != nil {
+		return nil, fmt.Errorf("error parsing a branch: %w", parseErr)
+	}
+
+	return p, nil
 }
 
 func (p *ParallelState) GetNext() (string, bool) {

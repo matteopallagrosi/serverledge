@@ -52,6 +52,7 @@ const (
 	Succeed  TaskType = "SuccessTask"
 	Pass     TaskType = "PassTask"
 	Wait     TaskType = "WaitNode"
+	Parallel TaskType = "ParallelTask"
 )
 
 func TaskFromType(nodeType TaskType) Task {
@@ -70,6 +71,8 @@ func TaskFromType(nodeType TaskType) Task {
 		return &SuccessTask{}
 	case Pass:
 		return &PassTask{}
+	case Parallel:
+		return &ParallelTask{}
 	default:
 		return &FunctionTask{}
 	}
@@ -93,6 +96,8 @@ func printType(t TaskType) string {
 		return "Pass"
 	case Wait:
 		return "Wait"
+	case Parallel:
+		return "Parallel"
 	}
 	return ""
 }

@@ -363,6 +363,35 @@ func (b *Builder) AddPassNode(result string) *Builder {
 	return b
 }
 
+// AddParallelNode connects a parallel node to the previous node
+func (b *Builder) AddParallelNode(branches []*Workflow, id string) *Builder {
+	nErrors := len(b.errors)
+	if nErrors > 0 {
+		fmt.Printf("AddParallelNode skipped, because of %d error(s) in builder\n", nErrors)
+		return b
+	}
+
+	parallelNode := NewParallelTask(branches)
+	if id != "" {
+		parallelNode.Id = TaskId(id)
+	}
+	b.workflow.add(parallelNode)
+
+	switch prevTask := b.prevNode.(type) {
+	case UnaryTask:
+		err := prevTask.SetNext(parallelNode)
+		if err != nil {
+			b.appendError(err)
+			return b
+		}
+	default:
+		panic("Unsupported previous task:" + prevTask.String())
+	}
+
+	b.prevNode = parallelNode
+	return b
+}
+
 // Build ends the single branch with an EndTask. If there is more than one branch, it panics!
 func (b *Builder) Build() (*Workflow, error) {
 	switch typedTask := b.prevNode.(type) {
