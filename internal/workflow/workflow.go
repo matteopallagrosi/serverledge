@@ -198,13 +198,21 @@ func (wflow *Workflow) ExecuteTask(r *Request, taskToExecute TaskId, input *Task
 	if !ok {
 		return nil, fmt.Errorf("failed to find task %s", n.GetId())
 	}
-
 	switch task := n.(type) {
 	case UnaryTask:
 		output, err := task.execute(input, r)
 		if err != nil {
 			progress.Fail(n.GetId())
 			return nil, err
+		}
+
+		if pTask, isParallel := task.(*ParallelTask); isParallel {
+			nextTaskId := pTask.GetNext()
+			nextTask, ok := wflow.Find(nextTaskId)
+			if !ok {
+				return nil, fmt.Errorf("failed to find next task %s", nextTaskId)
+			}
+			output = MapParallelOutputToNextInput(output, nextTask)
 		}
 
 		outputData = NewTaskData(output)
