@@ -35,9 +35,21 @@ func ApplyPreProcessors(input *TaskData, ops []DataOperation) error {
 	return nil
 }
 
-// ApplyJSONPath evaluates a map structure using standard JSONPath syntax (e.g., "$.key[1].subkey")
+// ApplyJSONPath evaluates a map structure using standard JSONPath syntax (e.g., "$.key[1].subkey").
+// To ensure compliance with pure ASL, if the path targets a root array index (e.g., "$[1]")
+// and the data contains a "parallel_results" key, the path is automatically rewritten
+// to target the internal parallel results array (e.g., "$.parallel_results[1]").
 func ApplyJSONPath(data map[string]interface{}, path string) (interface{}, error) {
 	cleanPath := strings.TrimPrefix(path, "$.")
+
+	// Check if the path attempts to access the root array directly (e.g., "$[")
+	if strings.HasPrefix(cleanPath, "$[") {
+		// If the input data wraps parallel results, transparently redirect the path
+		if _, hasParallelResults := data["parallel_results"]; hasParallelResults {
+			cleanPath = strings.Replace(cleanPath, "$[", "parallel_results[", 1)
+		}
+	}
+
 	segments := strings.Split(cleanPath, ".")
 
 	var current interface{} = data

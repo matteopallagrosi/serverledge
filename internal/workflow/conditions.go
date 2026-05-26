@@ -180,8 +180,8 @@ func (c Condition) findInputs(input map[string]interface{}) ([]interface{}, bool
 			if !ok {
 				return nil, false, fmt.Errorf("input name is not a string")
 			}
-			value, found := input[opStr]
-			if !found {
+			value, errPath := ApplyJSONPath(input, opStr)
+			if errPath != nil {
 				ops = append(ops, nil)
 			} else {
 				var value2 interface{}

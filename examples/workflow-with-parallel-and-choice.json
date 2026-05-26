@@ -40,26 +40,24 @@
       "Type": "Choice",
       "Choices": [
         {
-          "Comment": "Check if the result of the second branch is >= 10",
-          "Variable": "$.parallel_results[1].n",
+          "Variable": "$[1].n",
           "NumericGreaterThanEquals": 10,
           "Next": "HighValueTask"
         },
         {
-          "Comment": "Check if the result of the second branch is < 10",
-          "Variable": "$.parallel_results[1].n",
+          "Variable": "$[1].n",
           "NumericLessThan": 10,
           "Next": "LowValueTask"
         }
       ],
-      "Default": "LowValueTask"
+      "Default": "HighValueTask"
     },
 
     "HighValueTask": {
       "Comment": "Executed if the value was high",
       "Type": "Task",
       "Resource": "inc",
-      "InputPath": "$.parallel_results[1]",
+      "InputPath": "$[1]",
       "End": true
     },
 
@@ -67,7 +65,7 @@
       "Comment": "Executed if the value was low",
       "Type": "Task",
       "Resource": "inc",
-      "InputPath": "$.parallel_results[1]",
+      "InputPath": "$[1]",
       "End": true
     }
   }
