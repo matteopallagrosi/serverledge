@@ -1,0 +1,42 @@
+{
+  "Comment": "A state machine with parallel processing",
+  "StartAt": "ParallelState",
+  "States": {
+    "ParallelState": {
+      "Type": "Parallel",
+      "Branches": [
+        {
+          "StartAt": "FirstState",
+          "States": {
+            "FirstState": {
+              "Type": "Task",
+              "Resource": "inc",
+              "End": true
+            }
+          }
+        },
+        {
+          "StartAt": "SecondState",
+          "States": {
+            "SecondState": {
+              "Type": "Task",
+              "Resource": "inc",
+              "Next": "ThirdState"
+            },
+            "ThirdState": {
+              "Type": "Task",
+              "Resource": "inc",
+              "End": true
+            }
+          }
+        }
+      ],
+      "Next": "FinalState"
+    },
+    "FinalState": {
+      "Type": "Task",
+      "Resource": "add",
+      "End": true
+    }
+  }
+}

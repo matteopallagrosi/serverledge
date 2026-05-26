@@ -1,0 +1,74 @@
+{
+  "Comment": "A workflow where the Parallel State passes results to a Choice State",
+  "StartAt": "ParallelState",
+  "States": {
+    "ParallelState": {
+      "Type": "Parallel",
+      "Branches": [
+        {
+          "StartAt": "FirstState",
+          "States": {
+            "FirstState": {
+              "Comment": "The only task in first branch",
+              "Type": "Task",
+              "Resource": "inc",
+              "End": true
+            }
+          }
+        },
+        {
+          "StartAt": "FirstState",
+          "States": {
+            "FirstState": {
+              "Comment": "The first task in second branch",
+              "Type": "Task",
+              "Resource": "inc",
+              "Next": "SecondState"
+            },
+            "SecondState": {
+              "Comment": "The second task in second branch",
+              "Type": "Task",
+              "Resource": "inc",
+              "End": true
+            }
+          }
+        }
+      ],
+      "Next": "ChoiceState"
+    },
+    "ChoiceState": {
+      "Type": "Choice",
+      "Choices": [
+        {
+          "Comment": "Check if the result of the second branch is >= 10",
+          "Variable": "$.parallel_results[1].n",
+          "NumericGreaterThanEquals": 10,
+          "Next": "HighValueTask"
+        },
+        {
+          "Comment": "Check if the result of the second branch is < 10",
+          "Variable": "$.parallel_results[1].n",
+          "NumericLessThan": 10,
+          "Next": "LowValueTask"
+        }
+      ],
+      "Default": "LowValueTask"
+    },
+
+    "HighValueTask": {
+      "Comment": "Executed if the value was high",
+      "Type": "Task",
+      "Resource": "inc",
+      "InputPath": "$.parallel_results[1]",
+      "End": true
+    },
+
+    "LowValueTask": {
+      "Comment": "Executed if the value was low",
+      "Type": "Task",
+      "Resource": "inc",
+      "InputPath": "$.parallel_results[1]",
+      "End": true
+    }
+  }
+}
