@@ -17,15 +17,15 @@
           }
         },
         {
-          "StartAt": "FirstState",
+          "StartAt": "SecondState",
           "States": {
-            "FirstState": {
+            "SecondState": {
               "Comment": "The first task in second branch",
               "Type": "Task",
               "Resource": "inc",
-              "Next": "SecondState"
+              "Next": "ThirdState"
             },
-            "SecondState": {
+            "ThirdState": {
               "Comment": "The second task in second branch",
               "Type": "Task",
               "Resource": "inc",

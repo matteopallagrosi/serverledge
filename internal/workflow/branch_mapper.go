@@ -13,12 +13,12 @@ func MapParallelOutputToNextInput(output map[string]interface{}, nextTask Task) 
 		return output
 	}
 
-	delete(output, "parallel_results")
-
 	fTask, isFunc := nextTask.(*FunctionTask)
 	if !isFunc {
 		return output
 	}
+
+	delete(output, "parallel_results")
 
 	funct, exists := function.GetFunction(fTask.Func)
 	if !exists || funct.Signature == nil {
