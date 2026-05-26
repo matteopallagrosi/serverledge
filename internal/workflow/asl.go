@@ -104,6 +104,22 @@ func BuildFromTaskState(builder *Builder, t *asl.TaskState, name string) (*Build
 		return nil, fmt.Errorf("non existing function in workflow: %s", t.Resource)
 	}
 	builder = builder.AddFunctionTaskWithId(f, name)
+
+	if ft, ok := builder.prevNode.(*FunctionTask); ok {
+
+		inputPathStr := string(t.InputPath)
+		if inputPathStr != "" && inputPathStr != "$" {
+
+			op := DataOperation{
+				OpType: "JSONPathFilter",
+				Value:  inputPathStr,
+			}
+
+			// Append the data operation to the task's pre-processors chain
+			ft.PreProcessors = append(ft.PreProcessors, op)
+		}
+	}
+
 	return builder, nil
 }
 

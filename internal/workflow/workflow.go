@@ -198,6 +198,17 @@ func (wflow *Workflow) ExecuteTask(r *Request, taskToExecute TaskId, input *Task
 	if !ok {
 		return nil, fmt.Errorf("failed to find task %s", n.GetId())
 	}
+
+	// Check if the current task defines any pre-processing operations.
+	// If present, execute them immediately to mutate the input data before the task execution begins.
+	if ops := n.GetPreProcessors(); len(ops) > 0 {
+		err := ApplyPreProcessors(input, ops)
+		if err != nil {
+			progress.Fail(n.GetId())
+			return nil, fmt.Errorf("failed to pre-process data for task %s: %w", n.GetId(), err)
+		}
+	}
+
 	switch task := n.(type) {
 	case UnaryTask:
 		output, err := task.execute(input, r)
