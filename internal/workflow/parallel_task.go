@@ -5,6 +5,7 @@ import (
 	"sync"
 
 	"github.com/lithammer/shortuuid"
+	"github.com/serverledge-faas/serverledge/internal/types"
 )
 
 // ParallelTask receives an input, propagates it to each of the parallel branches, and produces a result for each of them
@@ -107,4 +108,20 @@ func (p *ParallelTask) String() string {
 	branchesStr += ">"
 
 	return fmt.Sprintf("[ParallelTask(%d): %s] ", len(p.Branches), branchesStr)
+}
+
+func (p *ParallelTask) Equals(cmp types.Comparable) bool {
+	p2, ok := cmp.(*ParallelTask)
+	if !ok {
+		return false
+	}
+	if p.Id != p2.Id || p.Next != p2.Next || len(p.Branches) != len(p2.Branches) {
+		return false
+	}
+	for i, b := range p.Branches {
+		if !b.Equals(p2.Branches[i]) {
+			return false
+		}
+	}
+	return true
 }
