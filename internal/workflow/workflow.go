@@ -290,6 +290,12 @@ func (wflow *Workflow) GetUniqueFunctions() []string {
 		switch n := task.(type) {
 		case *FunctionTask:
 			allFunctionsMap[n.Func] = nil
+		case *ParallelTask:
+			for _, bw := range n.Branches {
+				for _, fName := range bw.GetUniqueFunctions() {
+					allFunctionsMap[fName] = nil
+				}
+			}
 		default:
 			continue
 		}
@@ -833,6 +839,13 @@ func (wflow *Workflow) decodeTask(taskId string, value json.RawMessage) error {
 		task := &ChoiceTask{}
 		err = json.Unmarshal(value, task)
 		if err == nil && task.Id != "" && len(task.AlternativeNextTasks) == len(task.Conditions) {
+			wflow.Tasks[TaskId(taskId)] = task
+			return nil
+		}
+	case Parallel:
+		task := &ParallelTask{}
+		err = json.Unmarshal(value, task)
+		if err == nil && task.Id != "" && len(task.Branches) > 0 {
 			wflow.Tasks[TaskId(taskId)] = task
 			return nil
 		}
