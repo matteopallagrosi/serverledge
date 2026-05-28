@@ -293,3 +293,85 @@ func TestMismatchingArchNoOffload(t *testing.T) {
 	// delete function
 	deleteApiTest(t, name, HOST, PORT)
 }
+
+// TestCreateParallelWorkflow tests the REST API that creates a new workflow containing only a Parallel state.
+func TestCreateParallelWorkflow(t *testing.T) {
+	if testing.Short() {
+		t.Skip("Skipping integration test")
+	}
+	fcName := "parallel_test"
+	oldW, found := workflow.Get(fcName)
+	if found {
+		oldW.Delete()
+	}
+
+	fn, err := InitializePyFunction("inc", "handler", function.NewSignature().
+		AddInput("n", function.Int{}).
+		AddOutput("n", function.Int{}).
+		Build())
+	utils.AssertNilMsg(t, err, "failed to initialize function")
+
+	branch1 := func() (*workflow.Workflow, error) { return CreateSequenceWorkflow(fn) }
+	branch2 := func() (*workflow.Workflow, error) { return CreateSequenceWorkflow(fn, fn) }
+
+	wflow, err := CreateParallelWorkflow(branch1, branch2)
+	utils.AssertNil(t, err)
+	wflow.Name = fcName
+
+	err = createWorkflowApiTest(wflow, HOST, PORT)
+	if err != nil {
+		fmt.Println(err)
+		t.Fail()
+	}
+
+	getFC, b := workflow.Get(fcName)
+	utils.AssertTrue(t, b)
+	utils.AssertTrueMsg(t, wflow.Equals(getFC), "composition comparison failed")
+
+	err = wflow.Delete()
+	utils.AssertNilMsg(t, err, "failed to delete composition")
+}
+
+// TestInvokeParallelWorkflow tests the REST API that executes a workflow with a Parallel state
+func TestInvokeParallelWorkflow(t *testing.T) {
+	if testing.Short() {
+		t.Skip("Skipping integration test")
+	}
+	fcName := "parallel_test"
+
+	oldW, found := workflow.Get(fcName)
+	if found {
+		oldW.Delete()
+	}
+
+	fn, err := InitializePyFunction("inc", "handler", function.NewSignature().
+		AddInput("n", function.Int{}).
+		AddOutput("n", function.Int{}).
+		Build())
+	utils.AssertNilMsg(t, err, "failed to initialize function")
+
+	branch1 := func() (*workflow.Workflow, error) { return CreateSequenceWorkflow(fn) }
+	branch2 := func() (*workflow.Workflow, error) { return CreateSequenceWorkflow(fn, fn) }
+
+	wflow, err := CreateParallelWorkflow(branch1, branch2)
+	utils.AssertNil(t, err)
+	wflow.Name = fcName
+
+	err = createWorkflowApiTest(wflow, HOST, PORT)
+	if err != nil {
+		fmt.Println(err)
+		t.Fail()
+	}
+
+	params := make(map[string]interface{})
+	params["n"] = 2
+
+	invokeWorkflowApiTest(t, params, fcName, HOST, PORT, false)
+
+	getFC, b := workflow.Get(fcName)
+	utils.AssertTrue(t, b)
+	utils.AssertTrueMsg(t, wflow.Equals(getFC), "composition comparison failed")
+
+	err = wflow.Delete()
+	utils.AssertNilMsg(t, err, "failed to delete composition")
+}

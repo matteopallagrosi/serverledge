@@ -413,3 +413,19 @@ func GetIntSingleResult(cer *workflow.ExecutionReport) (int, error) {
 	}
 	return 0, fmt.Errorf("there is not exactly one result: there are %d result(s)", len(cer.Result))
 }
+
+// CreateParallelWorkflow if successful, returns a workflow with one Parallel Node containing the provided branches
+func CreateParallelWorkflow(daggers ...func() (*workflow.Workflow, error)) (*workflow.Workflow, error) {
+	branches := make([]*workflow.Workflow, 0)
+	for _, dagger := range daggers {
+		w, err := dagger()
+		if err != nil {
+			return nil, err
+		}
+		branches = append(branches, w)
+	}
+
+	return workflow.NewBuilder().
+		AddParallelNode(branches, "ParallelState").
+		Build()
+}
