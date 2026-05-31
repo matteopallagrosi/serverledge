@@ -1,8 +1,10 @@
 package workflow
 
 import (
+	"encoding/json"
 	"fmt"
 	"sync"
+	"time"
 
 	"github.com/lithammer/shortuuid"
 	"github.com/serverledge-faas/serverledge/internal/types"
@@ -56,10 +58,33 @@ func (p *ParallelTask) execute(input *TaskData, r *Request) (map[string]interfac
 
 			branchParams := copyMap(input.Data)
 
-			branchReq := NewRequest(branchReqId, bw, branchParams, r.ParamsSize)
-			branchReq.QoS = r.QoS
+			//
+			var branchParamsSize uint64 = 0
+			if payloadBytes, err := json.Marshal(branchParams); err == nil {
+				branchParamsSize = uint64(len(payloadBytes))
+			} else {
+				branchParamsSize = uint64(len(fmt.Sprintf("%v", branchParams)))
+			}
+
+			branchReq := NewRequest(branchReqId, bw, branchParams, branchParamsSize)
+
+			elapsed := time.Since(r.Arrival).Seconds()
+			remainingGlobalTime := r.QoS.MaxRespT - elapsed
+
+			branchQoS := r.QoS
+
+			// Allocate 80% of the remaining time to the branch, reserving a 20% safety buffer for subsequent tasks
+			if remainingGlobalTime > 0.100 {
+				branchQoS.MaxRespT = remainingGlobalTime * 0.8
+			} else {
+				branchQoS.MaxRespT = remainingGlobalTime
+			}
+
+			branchReq.QoS = branchQoS
+
 			branchReq.CanDoOffloading = r.CanDoOffloading
-			branchReq.Plan = r.Plan
+			branchReq.Plan = nil
+			//
 
 			// Invoke the branch workflow
 			err := bw.Invoke(branchReq)
