@@ -7,11 +7,10 @@ import (
 	"fmt"
 	"github.com/serverledge-faas/serverledge/internal/node"
 	"io"
+	"log"
 	"net/http"
 	"sort"
 	"time"
-
-	"log"
 
 	"github.com/serverledge-faas/serverledge/internal/client"
 	"github.com/serverledge-faas/serverledge/internal/config"
@@ -463,6 +462,11 @@ func (wflow *Workflow) Invoke(r *Request) error {
 	// Initialize map of TaskData
 	dataMap := make(map[TaskId]*TaskData)
 
+	//
+	retryCounts := make(map[TaskId]int)
+	const MaxRetries = 5
+	//
+
 	if len(progress.ReadyToExecute) == 0 {
 		return fmt.Errorf("[Rq-%v] wflow resumed but no task is ready for execution", requestId)
 	}
@@ -557,15 +561,34 @@ func (wflow *Workflow) Invoke(r *Request) error {
 			}
 			output, err := wflow.ExecuteTask(r, taskToExecute, input, progress)
 			if err != nil {
+				//
 				if errors.Is(err, node.OutOfResourcesErr) {
+					retryCounts[taskToExecute]++
+
+					if retryCounts[taskToExecute] > MaxRetries {
+						log.Printf("[Rq-%v] Task %s permanently failed after %d retries due to lack of resources.", requestId, taskToExecute, MaxRetries)
+						return fmt.Errorf("task %s failed after %d retries: out of resources", taskToExecute, MaxRetries)
+					}
+					//
+
 					log.Printf("[Rq-%v] Could not execute %s: out of resources", requestId, taskToExecute)
-					return err
+
+					//
+					sleepTime := time.Duration(100*retryCounts[taskToExecute]) * time.Millisecond
+					time.Sleep(sleepTime)
+					continue
+					//return err
+					//
 				} else {
 					return fmt.Errorf("failed wflow execution: %v", err)
 				}
 			}
 
 			log.Printf("[Rq-%v] Executed %s", requestId, taskToExecute)
+
+			//
+			delete(retryCounts, taskToExecute)
+			//
 
 			dataMap[taskToExecute] = output
 
