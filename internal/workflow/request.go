@@ -1,6 +1,7 @@
 package workflow
 
 import (
+	"sync"
 	"time"
 
 	"github.com/serverledge-faas/serverledge/internal/client"
@@ -23,6 +24,8 @@ type Request struct {
 	Async           bool
 	Resuming        bool            // indicating whether the function is resuming from a previous (partial) execution
 	Plan            *OffloadingPlan // optional; execution plan
+
+	mu sync.Mutex // per-execution lock to ensure thread-safe access to shared state
 }
 
 func NewRequest(reqId string, workflow *Workflow, params map[string]interface{}, paramsSize uint64) *Request {

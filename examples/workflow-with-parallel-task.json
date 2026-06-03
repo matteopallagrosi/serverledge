@@ -31,11 +31,6 @@
           }
         }
       ],
-      "Next": "FinalState"
-    },
-    "FinalState": {
-      "Type": "Task",
-      "Resource": "add",
       "End": true
     }
   }
