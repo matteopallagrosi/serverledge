@@ -15,8 +15,8 @@ type Builder struct {
 	prevNode            Task
 	errors              []error
 	BranchNumber        int
-	fanInPredecessors   []Task        // I nodi finali dei branch paralleli in attesa di Fan-In
-	pendingParallelTask *ParallelTask // Il nodo Parallel che aspetta di conoscere il suo 'Next'
+	fanInPredecessors   []Task        // Terminal nodes of parallel branches that need to be joined (Fan-In)
+	pendingParallelTask *ParallelTask // The ParallelTask node awaiting its 'Next' task to be set
 }
 
 func (b *Builder) appendError(err error) {
@@ -429,9 +429,11 @@ func CreateEmptyWorkflow() (*Workflow, error) {
 	return NewBuilder().Build()
 }
 
-// chainToNext collega il nuovo nodo al prevNode standard (1-to-1) o a tutti i fanInPredecessors (N-to-1).
+// chainToNext connects the new node to the workflow, handling both standard (1-to-1)
+// and Fan-In (N-to-1) connections from parallel branches
 func (b *Builder) chainToNext(newNode Task) error {
-	// Caso 1: dopo un ParallelTask (Fan-In N-a-1)
+	// Case 1: Fan-In scenario (N-to-1 connection).
+	// Links all terminal nodes of the preceding parallel branches to the new node.
 	if len(b.fanInPredecessors) > 0 {
 		for _, prev := range b.fanInPredecessors {
 			if p, ok := prev.(UnaryTask); ok {
@@ -451,10 +453,13 @@ func (b *Builder) chainToNext(newNode Task) error {
 		return nil
 	}
 
-	// Caso 2: esecuzione standard (1-a-1)
+	// Case 2: Standard execution (1-to-1 connection).
+	// Simply links the immediate predecessor to the new node.
 	if b.prevNode != nil {
 		if prev, ok := b.prevNode.(UnaryTask); ok {
 			return prev.SetNext(newNode)
+		} else {
+			panic("Unsupported previous task:" + b.prevNode.String())
 		}
 	}
 	return nil
