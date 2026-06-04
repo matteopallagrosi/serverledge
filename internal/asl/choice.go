@@ -41,6 +41,11 @@ func (c *ChoiceState) ParseFrom(jsonData []byte) (State, error) {
 	//if errArr != nil {
 	//	return nil, fmt.Errorf("error %v when parsing choice rule %s", errArr, choices[:offset])
 	//}
+
+	if len(choiceRules) == 0 {
+		return nil, fmt.Errorf("invalid Choice State: 'Choices' array must contain at least one rule")
+	}
+
 	c.Choices = choiceRules
 
 	return c, nil
