@@ -226,15 +226,6 @@ func (wflow *Workflow) ExecuteTask(r *Request, taskToExecute TaskId, input *Task
 			return nil, err
 		}
 
-		/*if pTask, isParallel := task.(*ParallelTask); isParallel {
-			nextTaskId := pTask.GetNext()
-			nextTask, ok := wflow.Find(nextTaskId)
-			if !ok {
-				return nil, fmt.Errorf("failed to find next task %s", nextTaskId)
-			}
-			output = MapParallelOutputToNextInput(output, nextTask)
-		}*/
-
 		outputData = NewTaskData(output)
 		progress.Complete(task.GetId())
 
