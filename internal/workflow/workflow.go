@@ -968,17 +968,15 @@ func (wflow *Workflow) prepareInput(taskToExecute TaskId, progress *Progress, da
 	}
 
 	previousTasks := wflow.GetPreviousTasks(taskToExecute)
-	keepIndex := 0
+	var prevTasks []TaskId
 	for _, previousTask := range previousTasks {
 		if progress.Status[previousTask] != Skipped {
-			previousTasks[keepIndex] = previousTask
-			keepIndex++
+			prevTasks = append(prevTasks, previousTask)
 		}
 	}
-	previousTasks = previousTasks[:keepIndex]
 
 	// Case 1: Initial task of a parallel branch
-	if len(previousTasks) == 0 {
+	if len(prevTasks) == 0 {
 		var parentParallelId TaskId = ""
 
 		// Find the parent ParallelTask that contains this branch task
@@ -1010,11 +1008,11 @@ func (wflow *Workflow) prepareInput(taskToExecute TaskId, progress *Progress, da
 	}
 
 	// Case 2: Multiple predecessors (logical Fan-In)
-	if len(previousTasks) > 1 {
+	if len(prevTasks) > 1 {
 		mergedResult := make(map[string]interface{})
-		parallelResults := make([]interface{}, len(previousTasks))
+		parallelResults := make([]interface{}, len(prevTasks))
 
-		for i, prevTask := range previousTasks {
+		for i, prevTask := range prevTasks {
 
 			in, found := dataMap[prevTask]
 			if !found {
@@ -1066,8 +1064,8 @@ func (wflow *Workflow) prepareInput(taskToExecute TaskId, progress *Progress, da
 	}
 
 	// Case 3: single predecessor
-	if len(previousTasks) == 1 {
-		previousTask := previousTasks[0]
+	if len(prevTasks) == 1 {
+		previousTask := prevTasks[0]
 		input, found := dataMap[previousTask]
 		if !found {
 			var err error
