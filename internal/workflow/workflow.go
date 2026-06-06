@@ -968,7 +968,7 @@ func findNextOrTerminate(state asl.CanEnd, sm *asl.StateMachine) (asl.State, str
 	return nextState, nextStateName, isTerminal
 }
 
-// prepareInput gestisce la logica di Fan-In unendo i dati dei branch precedenti
+// prepareInput resolves and prepares the input TaskData for a given task before its execution.
 func (wflow *Workflow) prepareInput(taskToExecute TaskId, progress *Progress, dataMap map[TaskId]*TaskData, r *Request) (*TaskData, error) {
 	requestId := ReqId(r.Id)
 
@@ -977,12 +977,20 @@ func (wflow *Workflow) prepareInput(taskToExecute TaskId, progress *Progress, da
 	}
 
 	previousTasks := wflow.GetPreviousTasks(taskToExecute)
+	keepIndex := 0
+	for _, previousTask := range previousTasks {
+		if progress.Status[previousTask] != Skipped {
+			previousTasks[keepIndex] = previousTask
+			keepIndex++
+		}
+	}
+	previousTasks = previousTasks[:keepIndex]
 
-	// Caso 1: task iniziale di un branch del Parallel Task
+	// Case 1: Initial task of a parallel branch
 	if len(previousTasks) == 0 {
 		var parentParallelId TaskId = ""
 
-		// Cerca qual è il ParallelTask che contiene questo task nei suoi Branch
+		// Find the parent ParallelTask that contains this branch task
 		for _, t := range wflow.Tasks {
 			if pTask, isParallel := t.(*ParallelTask); isParallel {
 				for _, branchTask := range pTask.Branches {
@@ -997,7 +1005,6 @@ func (wflow *Workflow) prepareInput(taskToExecute TaskId, progress *Progress, da
 			}
 		}
 
-		// Recupera i dati in input al Parallel Task
 		if parentParallelId != "" {
 			input, found := dataMap[parentParallelId]
 			if !found {
@@ -1011,24 +1018,12 @@ func (wflow *Workflow) prepareInput(taskToExecute TaskId, progress *Progress, da
 		}
 	}
 
-	// Caso 2: precedecessori multipli (Fan-In logico)
+	// Case 2: Multiple predecessors (logical Fan-In)
 	if len(previousTasks) > 1 {
 		mergedResult := make(map[string]interface{})
 		parallelResults := make([]interface{}, len(previousTasks))
 
-		// Ordina gli ID dei predecessori per garantire un array di output deterministico
-		sortedPrev := make([]string, len(previousTasks))
-		for i, p := range previousTasks {
-			sortedPrev[i] = string(p)
-		}
-		sort.Strings(sortedPrev)
-
-		for i, prevID := range sortedPrev {
-			prevTask := TaskId(prevID)
-			// TODO: check if failed
-			if progress.Status[prevTask] == Skipped {
-				continue
-			}
+		for i, prevTask := range previousTasks {
 
 			in, found := dataMap[prevTask]
 			if !found {
@@ -1042,10 +1037,44 @@ func (wflow *Workflow) prepareInput(taskToExecute TaskId, progress *Progress, da
 		}
 
 		mergedResult["parallel_results"] = parallelResults
+
+		// If the next task is a FunctionTask, it applies a positional mapping where the output of the i-th parallel branch
+		// is mapped directly to the i-th input parameter of the function. For any other task type, the output remains unchanged.
+		currentTask, ok := wflow.Find(taskToExecute)
+		if !ok {
+			return nil, fmt.Errorf("failed to find next task %s", taskToExecute)
+		}
+
+		fTask, isFunc := currentTask.(*FunctionTask)
+		if !isFunc {
+			return NewTaskData(mergedResult), nil
+		}
+
+		funct, exists := function.GetFunction(fTask.Func)
+		if !exists || funct.Signature == nil {
+			return NewTaskData(mergedResult), nil
+		}
+
+		delete(mergedResult, "parallel_results")
+
+		// Positional mapping
+		expectedInputs := funct.Signature.GetInputs()
+		for i, res := range parallelResults {
+			if i < len(expectedInputs) {
+				targetParamName := expectedInputs[i].Name
+				if resMap, ok := res.(map[string]interface{}); ok {
+					for _, val := range resMap {
+						mergedResult[targetParamName] = val
+						break
+					}
+				}
+			}
+		}
+
 		return NewTaskData(mergedResult), nil
 	}
 
-	// Caso 3: un solo predecessore
+	// Case 3: single predecessor
 	if len(previousTasks) == 1 {
 		previousTask := previousTasks[0]
 		input, found := dataMap[previousTask]
