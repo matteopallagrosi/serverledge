@@ -9,6 +9,7 @@ import (
 	"log"
 	"net/http"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/serverledge-faas/serverledge/internal/node"
@@ -486,7 +487,7 @@ func (wflow *Workflow) Invoke(r *Request) error {
 	for len(progress.ReadyToExecute) > 0 || len(runningTasks) > 0 {
 		r.mu.Lock()
 
-		if len(runningTasks) == 0 && len(progress.ReadyToExecute) > 0 {
+		if len(progress.ReadyToExecute) > 0 {
 			t0 := time.Now()
 			decision, err := offloadingPolicy.Evaluate(r, progress)
 			policyTime := time.Since(t0).Seconds()
@@ -514,80 +515,60 @@ func (wflow *Workflow) Invoke(r *Request) error {
 			}
 
 			if decision.Offload {
+				offloadJobId := TaskId(fmt.Sprintf("OFFLOAD_JOB_%d", time.Now().UnixNano()))
+				runningTasks[offloadJobId] = true
+
+				go func(jobId TaskId, dec OffloadingDecision) {
+					err := offload(r, &dec)
+
+					resultChan <- taskResult{tid: jobId, out: nil, err: err}
+				}(offloadJobId, decision)
+
+				log.Printf("[Rq-%v] Offloading task dispatched remotely", requestId)
+			}
+
+			var tasksToKeep []TaskId
+			var tasksToLaunch []TaskId
+
+			// pick next executable task
+			for _, task := range progress.ReadyToExecute {
+				if r.Plan == nil || slices.Contains(r.Plan.ToExecute, task) {
+					tasksToLaunch = append(tasksToLaunch, task)
+				} else {
+					tasksToKeep = append(tasksToKeep, task)
+				}
+			}
+			progress.ReadyToExecute = tasksToKeep
+
+			if len(runningTasks) == 0 && len(tasksToLaunch) == 0 && len(progress.ReadyToExecute) > 0 {
+				log.Printf("[Rq-%v] Workflow has not completed but there is nothing left to execute in the plan", requestId)
 				r.mu.Unlock()
-				err = offload(r, &decision)
+				break
+			}
+
+			for _, taskToExecute := range tasksToLaunch {
+				log.Printf("[Rq-%v] Now going to execute %s", requestId, taskToExecute)
+
+				input, err := wflow.prepareInput(taskToExecute, progress, dataMap, r)
 				if err != nil {
+					r.mu.Unlock()
 					return err
 				}
 
-				if r.ExecReport.Result != nil {
-					// Workflow execution has completed on remote node
-					log.Printf("[Rq-%v] Workflow has completed on remote node", requestId)
-					return nil
+				if input == nil {
+					log.Printf("Nil input for task: %s", taskToExecute)
 				}
 
-				r.mu.Lock()
-				progress, err = RetrieveProgress(requestId)
-				if err != nil {
-					r.mu.Unlock()
-					return fmt.Errorf("Could not retrieve progress after offloading: %v", err)
-				}
+				runningTasks[taskToExecute] = true
 
-				r.mu.Unlock()
-				log.Printf("[Rq-%v] Ready to execute after offloading: %v", requestId, progress.ReadyToExecute)
+				go func(t TaskId, in *TaskData) {
+					out, execErr := wflow.ExecuteTask(r, t, in, progress)
+					resultChan <- taskResult{tid: t, out: out, err: execErr}
+				}(taskToExecute, input)
 			}
 		}
 
-		var tasksToKeep []TaskId
-		var tasksToLaunch []TaskId
-
-		// pick next executable task
-		var taskToExecute TaskId = ""
-		for _, task := range progress.ReadyToExecute {
-			if r.Plan == nil || slices.Contains(r.Plan.ToExecute, task) {
-				tasksToLaunch = append(tasksToLaunch, task)
-			} else {
-				tasksToKeep = append(tasksToKeep, task)
-			}
-		}
-		progress.ReadyToExecute = tasksToKeep
-
-		if len(runningTasks) == 0 && len(tasksToLaunch) == 0 && len(progress.ReadyToExecute) > 0 {
-			log.Printf("[Rq-%v] Workflow has not completed but there is nothing left to execute in the plan", requestId)
-			r.mu.Unlock()
-			break
-		}
-
-		type dispatchInfo struct {
-			tid TaskId
-			in  *TaskData
-		}
-		var toDispatch []dispatchInfo
-
-		for _, taskToExecute = range tasksToLaunch {
-			log.Printf("[Rq-%v] Now going to execute %s", requestId, taskToExecute)
-
-			input, err := wflow.prepareInput(taskToExecute, progress, dataMap, r)
-			if err != nil {
-				r.mu.Unlock()
-				return err
-			}
-
-			if input == nil {
-				log.Printf("Nil input for task: %s", taskToExecute)
-			}
-
-			runningTasks[taskToExecute] = true
-			toDispatch = append(toDispatch, dispatchInfo{tid: taskToExecute, in: input})
-		}
 		r.mu.Unlock()
-
-		for _, item := range toDispatch {
-			go func(tid TaskId, in *TaskData) {
-				out, execErr := wflow.ExecuteTask(r, tid, in, progress)
-				resultChan <- taskResult{tid: tid, out: out, err: execErr}
-			}(item.tid, item.in)
-		}
 
 		if len(runningTasks) > 0 {
 			res := <-resultChan
@@ -598,7 +579,7 @@ func (wflow *Workflow) Invoke(r *Request) error {
 			if res.err != nil {
 				if errors.Is(err, node.OutOfResourcesErr) {
 					// TODO
-					log.Printf("[Rq-%v] Could not execute %s: out of resources", requestId, taskToExecute)
+					log.Printf("[Rq-%v] Could not execute %s: out of resources", requestId, res.tid)
 					r.mu.Unlock()
 					return res.err
 				} else {
@@ -607,9 +588,29 @@ func (wflow *Workflow) Invoke(r *Request) error {
 				}
 			}
 
-			log.Printf("[Rq-%v] Executed %s", requestId, res.tid)
-			if res.out != nil {
-				dataMap[res.tid] = res.out
+			if strings.HasPrefix(string(res.tid), "OFFLOAD_JOB") {
+				log.Printf("[Rq-%v] Remote offloading completed. Syncing state...", requestId)
+
+				remoteProgress, err := RetrieveProgress(requestId)
+				if err != nil {
+					r.mu.Unlock()
+					return fmt.Errorf("could not retrieve remote progress: %v", err)
+				}
+
+				for k, v := range remoteProgress.Status {
+					progress.Status[k] = v
+				}
+				progress.ReadyToExecute = append(progress.ReadyToExecute, remoteProgress.ReadyToExecute...)
+
+				if r.ExecReport.Result != nil {
+					log.Printf("[Rq-%v] Workflow fully completed on remote node", requestId)
+				}
+
+			} else {
+				log.Printf("[Rq-%v] Executed locally: %s", requestId, res.tid)
+				if res.out != nil {
+					dataMap[res.tid] = res.out
+				}
 			}
 
 			if len(progress.ReadyToExecute) == 0 && len(runningTasks) == 0 && res.out != nil {
