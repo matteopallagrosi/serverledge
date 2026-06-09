@@ -455,7 +455,7 @@ func (wflow *Workflow) savePartialDataForReadyTasks(requestId ReqId, progress *P
 }
 
 // Invoke schedules each function of the workflow and invokes them
-func (wflow *Workflow) Invoke(r *Request) error {
+/*func (wflow *Workflow) Invoke(r *Request) error {
 
 	alwaysSaveProgress := config.GetBool(config.WORKFLOW_ALWAYS_SAVE_PROGRESS, false)
 
@@ -652,6 +652,235 @@ func (wflow *Workflow) Invoke(r *Request) error {
 	}
 
 	r.mu.Unlock()
+	return nil
+}*/
+
+// Invoke schedules each function of the workflow and invokes them
+func (wflow *Workflow) Invoke(r *Request) error {
+	alwaysSaveProgress := config.GetBool(config.WORKFLOW_ALWAYS_SAVE_PROGRESS, false)
+
+	requestId := ReqId(r.Id)
+
+	progress, isProgressOnEtcd, err := wflow.initializeOrRetrieveProgress(r)
+	if err != nil {
+		return err
+	}
+
+	// Initialize map of TaskData
+	dataMap := make(map[TaskId]*TaskData)
+
+	if len(progress.ReadyToExecute) == 0 {
+		return fmt.Errorf("[Rq-%v] wflow resumed but no task is ready for execution", requestId)
+	}
+
+	log.Printf("[Rq-%v] Starting/resuming execution (%d to executed)", requestId, len(progress.ReadyToExecute))
+
+	type taskResult struct {
+		tid TaskId
+		out *TaskData
+		err error
+	}
+
+	localReadyChan := make(chan TaskId, len(wflow.Tasks))
+	resultChan := make(chan taskResult, len(wflow.Tasks))
+	dispatchSignalChan := make(chan struct{}, 1)
+
+	runningTasks := make(map[TaskId]bool)
+
+	// Non-blocking trigger: signals the dispatcher or drops if a signal is already pending
+	triggerDispatch := func() {
+		select {
+		case dispatchSignalChan <- struct{}{}:
+		default:
+		}
+	}
+
+	// Evaluates policies and dispatches ready tasks
+	dispatchReadyTasks := func() error {
+		r.mu.Lock()
+		defer r.mu.Unlock()
+
+		if len(progress.ReadyToExecute) == 0 {
+			return nil
+		}
+
+		t0 := time.Now()
+		decision, err := offloadingPolicy.Evaluate(r, progress)
+		policyTime := time.Since(t0).Seconds()
+		r.ExecReport.SchedulingTime += policyTime
+
+		if err != nil {
+			return fmt.Errorf("an error occurred in policy evaluation: %v", err)
+		}
+
+		if decision.Offload || alwaysSaveProgress {
+			err := progress.Save()
+			if err != nil {
+				return fmt.Errorf("Could not save progress: %v", err)
+			}
+			isProgressOnEtcd = true
+
+			err = wflow.savePartialDataForReadyTasks(requestId, progress, dataMap)
+			if err != nil {
+				return fmt.Errorf("Could not save partial data: %v", err)
+			}
+		}
+
+		if decision.Offload {
+			offloadJobId := TaskId(fmt.Sprintf("OFFLOAD_JOB_%d", time.Now().UnixNano()))
+			runningTasks[offloadJobId] = true
+
+			go func(jobId TaskId, dec OffloadingDecision) {
+				err := offload(r, &dec)
+
+				resultChan <- taskResult{tid: jobId, out: nil, err: err}
+			}(offloadJobId, decision)
+
+			log.Printf("[Rq-%v] Offloading task dispatched remotely", requestId)
+		}
+
+		var tasksToKeep []TaskId
+
+		// pick next executable task
+		for _, task := range progress.ReadyToExecute {
+			if r.Plan == nil || slices.Contains(r.Plan.ToExecute, task) {
+				localReadyChan <- task
+			} else {
+				tasksToKeep = append(tasksToKeep, task)
+			}
+		}
+
+		progress.ReadyToExecute = tasksToKeep
+
+		return nil
+	}
+
+	triggerDispatch()
+
+	for {
+		r.mu.Lock()
+		pendingTasks := len(progress.ReadyToExecute)
+		r.mu.Unlock()
+
+		if len(runningTasks) == 0 && len(localReadyChan) == 0 && len(dispatchSignalChan) == 0 {
+			if pendingTasks > 0 {
+				log.Printf("[Rq-%v] Workflow has not completed but there is nothing left to execute in the plan", requestId)
+				break
+			}
+
+			log.Printf("[Rq-%v] Workflow completed", requestId)
+
+			if isProgressOnEtcd {
+				err = DeleteProgress(requestId)
+				if err != nil {
+					log.Printf("Failed to delete progress: %v", err)
+				}
+				err = DeleteAllTaskData(requestId)
+				if err != nil {
+					log.Printf("Failed to delete task data: %v", err)
+				}
+			}
+
+			return nil
+		}
+
+		select {
+		case <-dispatchSignalChan:
+
+			if err := dispatchReadyTasks(); err != nil {
+				return err
+			}
+
+		case taskToExecute := <-localReadyChan:
+
+			r.mu.Lock()
+
+			log.Printf("[Rq-%v] Now going to execute %s", requestId, taskToExecute)
+
+			input, err := wflow.prepareInput(taskToExecute, progress, dataMap, r)
+			if err != nil {
+				r.mu.Unlock()
+				return err
+			}
+
+			runningTasks[taskToExecute] = true
+
+			r.mu.Unlock()
+
+			if input == nil {
+				log.Printf("Nil input for task: %s", taskToExecute)
+			}
+
+			go func(t TaskId, in *TaskData) {
+				out, execErr := wflow.ExecuteTask(r, t, in, progress)
+				resultChan <- taskResult{tid: t, out: out, err: execErr}
+			}(taskToExecute, input)
+
+		case res := <-resultChan:
+
+			r.mu.Lock()
+			delete(runningTasks, res.tid)
+			r.mu.Unlock()
+
+			if res.err != nil {
+				if errors.Is(res.err, node.OutOfResourcesErr) {
+					// TODO
+					log.Printf("[Rq-%v] Could not execute %s: out of resources", requestId, res.tid)
+					return res.err
+				} else {
+					return fmt.Errorf("failed wflow execution: %v", res.err)
+				}
+			}
+
+			r.mu.Lock()
+			if strings.HasPrefix(string(res.tid), "OFFLOAD_JOB") {
+				log.Printf("[Rq-%v] Remote offloading completed.", requestId)
+
+				remoteProgress, err := RetrieveProgress(requestId)
+				if err != nil {
+					r.mu.Unlock()
+					return fmt.Errorf("could not retrieve remote progress: %v", err)
+				}
+
+				for k, v := range remoteProgress.Status {
+					progress.Status[k] = v
+				}
+				progress.ReadyToExecute = append(progress.ReadyToExecute, remoteProgress.ReadyToExecute...)
+
+				if r.ExecReport.Result != nil {
+					log.Printf("[Rq-%v] Workflow fully completed on remote node", requestId)
+				}
+
+			} else {
+				log.Printf("[Rq-%v] Executed locally: %s", requestId, res.tid)
+				if res.out != nil {
+					dataMap[res.tid] = res.out
+
+					r.ExecReport.Result = res.out.Data
+				}
+			}
+			r.mu.Unlock()
+
+			triggerDispatch()
+
+		}
+	}
+
+	r.mu.Lock()
+	if len(progress.ReadyToExecute) > 0 {
+		err = progress.Save()
+		if err != nil {
+			r.mu.Unlock()
+			return err
+		}
+		err = wflow.savePartialDataForReadyTasks(requestId, progress, dataMap)
+		if err != nil {
+			r.mu.Unlock()
+			return fmt.Errorf("Could not save partial data: %v", err)
+		}
+	}
+	r.mu.Unlock()
+
 	return nil
 }
 
