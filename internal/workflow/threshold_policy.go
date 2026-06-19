@@ -1,11 +1,12 @@
 package workflow
 
 import (
+	"log"
+
 	"github.com/serverledge-faas/serverledge/internal/config"
 	"github.com/serverledge-faas/serverledge/internal/function"
 	"github.com/serverledge-faas/serverledge/internal/node"
 	"github.com/serverledge-faas/serverledge/internal/registration"
-	"log"
 )
 
 type ThresholdBasedPolicy struct{}
@@ -18,10 +19,11 @@ func (policy *ThresholdBasedPolicy) Init() {
 	maxOffloadedTasks = config.GetInt(config.WORKFLOW_THRESHOLD_BASED_POLICY_MAX_OFFLOADED, 5)
 }
 
-func (policy *ThresholdBasedPolicy) Evaluate(r *Request, p *Progress) (OffloadingDecision, error) {
+// TODO: oltre ai task offloaded dovrebbe settare local execution per tutti gli altri task in r.Plan.ToExecute (plan locale)
+func (policy *ThresholdBasedPolicy) Evaluate(r *Request, p *Progress) ([]OffloadingDecision, error) {
 
 	if p == nil || !r.CanDoOffloading || len(p.ReadyToExecute) == 0 {
-		return OffloadingDecision{Offload: false}, nil
+		return []OffloadingDecision{{Offload: false}}, nil
 	}
 
 	usedMemory := node.LocalResources.UsedMemory()
@@ -32,19 +34,19 @@ func (policy *ThresholdBasedPolicy) Evaluate(r *Request, p *Progress) (Offloadin
 	if !ok {
 		log.Printf("Executing locally non-function task '%s'", nextTaskId)
 		// not a FunctionTask
-		return OffloadingDecision{Offload: false}, nil
+		return []OffloadingDecision{{Offload: false}}, nil
 	}
 
 	f, found := function.GetFunction(funcTask.Func)
 	if !found {
 		log.Printf("Could not find function for task %s", nextTaskId)
-		return OffloadingDecision{Offload: false}, nil
+		return []OffloadingDecision{{Offload: false}}, nil
 	}
 
 	if float64(usedMemory+f.MemoryMB)/float64(node.LocalResources.TotalMemory()) <= utilizationThreshold {
 		log.Printf("Threshold OK...executing locally %v", nextTaskId)
 		// execute locally next task
-		return OffloadingDecision{Offload: false}, nil
+		return []OffloadingDecision{{Offload: false}}, nil
 	}
 
 	log.Printf("Threshold violated...must offload %v", nextTaskId)
@@ -124,9 +126,9 @@ func (policy *ThresholdBasedPolicy) Evaluate(r *Request, p *Progress) (Offloadin
 
 	if targetNode == nil {
 		log.Printf("No target available for offloading")
-		return OffloadingDecision{Offload: false}, nil
+		return []OffloadingDecision{{Offload: false}}, nil
 	}
 
 	log.Printf("Offloading %v to %v", offloadedTasks, targetNode)
-	return OffloadingDecision{Offload: true, RemoteHost: targetNode.APIUrl(), OffloadingPlan: OffloadingPlan{ToExecute: offloadedTasks}}, nil
+	return []OffloadingDecision{{Offload: true, RemoteHost: targetNode.APIUrl(), OffloadingPlan: OffloadingPlan{ToExecute: offloadedTasks}}}, nil
 }

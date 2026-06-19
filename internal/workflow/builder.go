@@ -322,6 +322,10 @@ func (b *Builder) AddSucceedNodeAndBuild(message string) (*Workflow, error) {
 }
 
 func (b *Builder) AddPassNode(result string) *Builder {
+	return b.AddPassNodeWithId(result, "")
+}
+
+func (b *Builder) AddPassNodeWithId(result string, id string) *Builder {
 	nErrors := len(b.errors)
 	if nErrors > 0 {
 		fmt.Printf("AddFunctionTask skipped, because of %d error(s) in builder\n", nErrors)
@@ -329,6 +333,9 @@ func (b *Builder) AddPassNode(result string) *Builder {
 	}
 
 	passNode := NewPassTask(result)
+	if id != "" {
+		passNode.Id = TaskId(id)
+	}
 
 	b.workflow.add(passNode)
 

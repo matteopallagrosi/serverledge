@@ -181,6 +181,8 @@ func ResumeWorkflow(e echo.Context) error {
 		req.Plan = nil
 	}
 
+	req.InitialProgress = clientReq.Progress
+
 	log.Printf("Resuming workflow '%s'", workflowName)
 
 	return handleWorkflowInvocation(e, req)
@@ -267,11 +269,13 @@ func handleWorkflowInvocation(e echo.Context, req *workflow.Request) error {
 		req.ExecReport.ResponseTime = time.Now().Sub(req.Arrival).Seconds()
 
 		return e.JSON(http.StatusOK, workflow.InvocationResponse{
-			Success:        true,
-			Result:         req.ExecReport.Result,
-			Reports:        req.ExecReport.Reports,
-			ResponseTime:   req.ExecReport.ResponseTime,
-			SchedulingTime: req.ExecReport.SchedulingTime,
+			Success:              true,
+			Result:               req.ExecReport.Result,
+			Reports:              req.ExecReport.Reports,
+			ResponseTime:         req.ExecReport.ResponseTime,
+			SchedulingTime:       req.ExecReport.SchedulingTime,
+			ResultingProgress:    req.InitialProgress,
+			NextTasksNotEligible: req.NextTasksNotEligible,
 		})
 	}
 }

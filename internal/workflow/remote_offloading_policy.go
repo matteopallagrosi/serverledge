@@ -2,7 +2,6 @@ package workflow
 
 import (
 	"encoding/json"
-	"github.com/serverledge-faas/serverledge/internal/node"
 	"log"
 	"math"
 	"net/http"
@@ -10,6 +9,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/serverledge-faas/serverledge/internal/node"
 
 	"github.com/serverledge-faas/serverledge/internal/config"
 	"github.com/serverledge-faas/serverledge/internal/function"
@@ -43,7 +44,7 @@ type remotePolicyParams struct {
 	InitTime map[string]float64 `json:"init_time"` // map[json.dumps((task, node))] = time
 }
 
-type taskPlacement map[TaskId]string
+type TaskPlacement map[TaskId]string
 
 func initParams() remotePolicyParams {
 	return remotePolicyParams{
@@ -69,14 +70,14 @@ const CLOUD = "CLOUD"
 var httpClient = &http.Client{Timeout: 10 * time.Second}
 
 type cachedPlacement struct {
-	placement taskPlacement
+	placement TaskPlacement
 	ttl       int
 }
 
 var placementCacheMutex sync.Mutex = sync.Mutex{}
 var placementCache map[string]*cachedPlacement
 
-func getCachedSolution(r *Request) (*taskPlacement, bool) {
+func getCachedSolution(r *Request) (*TaskPlacement, bool) {
 	placementCacheMutex.Lock()
 	defer placementCacheMutex.Unlock()
 
@@ -100,7 +101,7 @@ func getCachedSolution(r *Request) (*taskPlacement, bool) {
 	return nil, false
 }
 
-func cacheSolution(r *Request, sol *taskPlacement, ttl int) {
+func cacheSolution(r *Request, sol *TaskPlacement, ttl int) {
 	placementCacheMutex.Lock()
 	defer placementCacheMutex.Unlock()
 
@@ -409,6 +410,15 @@ func prepareParameters(r *Request, p *Progress) *remotePolicyParams {
 				params.Adj[string(tid)] = append(params.Adj[string(tid)], entry)
 			}
 			params.TaskMemory[string(tid)] = float64(10)
+
+		case *ParallelTask:
+			for _, branchId := range typedTask.Branches {
+				entry := tupleKey(string(branchId), "1.0") // 100% di probabilità
+				params.Adj[string(tid)] = append(params.Adj[string(tid)], entry)
+			}
+
+			params.TaskMemory[string(tid)] = float64(10)
+
 		case UnaryTask:
 			nextTid := string(typedTask.GetNext())
 			entry := tupleKey(nextTid, "1.0")
@@ -431,17 +441,78 @@ func prepareParameters(r *Request, p *Progress) *remotePolicyParams {
 	return &params
 }
 
-func computeDecisionFromPlacement(placement taskPlacement, p *Progress, r *Request) OffloadingDecision {
+func ComputeDecisionFromPlacement(placement TaskPlacement, p *Progress, r *Request) []OffloadingDecision {
+	localKey := registration.SelfRegistration.Key
 
-	var localExecution = false
+	nodeToTasks := make(map[string][]TaskId)
+	for t, assignedNode := range placement {
+		nodeToTasks[assignedNode] = append(nodeToTasks[assignedNode], t)
+	}
+
+	//Imposta il piano di esecuzione per il nodo locale
+	r.Plan = &OffloadingPlan{ToExecute: nodeToTasks[localKey]}
+
+	readyRemoteNodes := make(map[string]bool)
+	for _, t := range p.ReadyToExecute {
+		assignedNode := placement[t]
+		if assignedNode != localKey {
+			readyRemoteNodes[assignedNode] = true
+		}
+	}
+
+	// Se la mappa è vuota, significa che tutti i task ready sono per noi (o non ce ne sono)
+	if len(readyRemoteNodes) == 0 {
+		log.Println("Continuing with local execution")
+		// Ritorna una slice contenente una singola decisione "vuota/falsa"
+		return []OffloadingDecision{{Offload: false}}
+	}
+
+	var decisions []OffloadingDecision
+
+	for remoteNode := range readyRemoteNodes {
+		var remoteNodeReg *registration.NodeRegistration
+		if remoteNode == CLOUD {
+			remoteNodeReg = registration.GetRemoteOffloadingTarget()
+		} else {
+			remoteNodeReg = registration.GetPeerFromKey(remoteNode)
+		}
+
+		if remoteNodeReg == nil {
+			log.Printf("Warning: Node %s not found in registry, skipping offload", remoteNode)
+			continue
+		}
+
+		// Assegniamo al nodo remoto tutti i task che gli spettano dal placement
+		plan := OffloadingPlan{ToExecute: nodeToTasks[remoteNode]}
+
+		decision := OffloadingDecision{
+			Offload:        true,
+			RemoteHost:     remoteNodeReg.APIUrl(),
+			OffloadingPlan: plan,
+		}
+
+		decisions = append(decisions, decision)
+	}
+
+	return decisions
+
+	/*localTasks := make([]TaskId, 0)
+	for t, assignedNode := range placement {
+		if assignedNode == registration.SelfRegistration.Key {
+			localTasks = append(localTasks, t)
+		}
+	}
+	r.Plan = &OffloadingPlan{ToExecute: localTasks}
+
+	localExecution := true
+
 	var remoteNode string
 	for _, t := range p.ReadyToExecute {
 		assignedNode := placement[t]
-		if assignedNode == registration.SelfRegistration.Key {
-			localExecution = true
-			break
-		} else {
+		if assignedNode != registration.SelfRegistration.Key {
 			remoteNode = assignedNode
+			localExecution = false
+			break
 		}
 	}
 
@@ -468,5 +539,5 @@ func computeDecisionFromPlacement(placement taskPlacement, p *Progress, r *Reque
 	}
 
 	decision := OffloadingDecision{true, remoteNodeReg.APIUrl(), plan}
-	return decision
+	return decision*/
 }
