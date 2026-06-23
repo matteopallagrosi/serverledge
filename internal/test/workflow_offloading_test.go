@@ -68,7 +68,8 @@ func newMockNode(t *testing.T, name string, wf *workflow.Workflow) *mockNode {
 			Plan:            &req.Plan,
 			ExecReport:      workflow.ExecutionReport{},
 			Resuming:        true,
-			InitialProgress: req.Progress,
+			Progress:        req.Progress,
+			InitialData:     req.Data,
 		}
 
 		err := wf.Invoke(resumeReq)
@@ -99,13 +100,12 @@ func newMockNode(t *testing.T, name string, wf *workflow.Workflow) *mockNode {
 		resumeReq.ExecReport.ResponseTime = time.Since(arrival).Seconds()
 
 		resp := workflow.InvocationResponse{
-			Success:              true,
-			Result:               resumeReq.ExecReport.Result,
-			Reports:              resumeReq.ExecReport.Reports,
-			ResponseTime:         resumeReq.ExecReport.ResponseTime,
-			SchedulingTime:       resumeReq.ExecReport.SchedulingTime,
-			ResultingProgress:    resumeReq.InitialProgress,
-			NextTasksNotEligible: resumeReq.NextTasksNotEligible,
+			Success:        true,
+			Result:         resumeReq.ExecReport.Result,
+			Reports:        resumeReq.ExecReport.Reports,
+			ResponseTime:   resumeReq.ExecReport.ResponseTime,
+			SchedulingTime: resumeReq.ExecReport.SchedulingTime,
+			ResumeData:     &workflow.ResumeResponseData{ResultingProgress: resumeReq.Progress, NextTasksNotEligible: resumeReq.NextTasksNotEligible},
 		}
 
 		w.Header().Set("Content-Type", "application/json")

@@ -523,7 +523,7 @@ func TestResumeWorkflow(t *testing.T) {
 	resumedRequest := workflow.NewRequest(request.Id, wflow, params, approximateMapSize(params))
 	resumedRequest.CanDoOffloading = true
 	resumedRequest.Resuming = true
-	resumedRequest.InitialProgress = *progress
+	resumedRequest.Progress = *progress
 
 	err2 := wflow.Invoke(resumedRequest)
 	u.AssertNil(t, err2)

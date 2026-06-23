@@ -24,8 +24,9 @@ type Request struct {
 	Async                bool
 	Resuming             bool            // indicating whether the function is resuming from a previous (partial) execution
 	Plan                 *OffloadingPlan // optional; execution plan
-	InitialProgress      Progress        // optional
-	NextTasksNotEligible []TaskId        // optional
+	Progress             Progress
+	InitialData          map[TaskId]TaskData // optional
+	NextTasksNotEligible []TaskId            // optional
 
 	mu sync.Mutex // per-execution lock to ensure thread-safe access to shared state
 }
@@ -47,11 +48,16 @@ func NewRequest(reqId string, workflow *Workflow, params map[string]interface{},
 }
 
 type InvocationResponse struct {
-	Success              bool
-	Result               map[string]interface{}
-	Reports              map[string]*function.ExecutionReport
-	ResponseTime         float64 // time waited by the user to get the output of the entire workflow (in seconds)
-	SchedulingTime       float64
+	Success        bool
+	Result         map[string]interface{}
+	Reports        map[string]*function.ExecutionReport
+	ResponseTime   float64 // time waited by the user to get the output of the entire workflow (in seconds)
+	SchedulingTime float64
+
+	ResumeData *ResumeResponseData `json:"resume_data,omitempty"`
+}
+
+type ResumeResponseData struct {
 	ResultingProgress    Progress
 	NextTasksNotEligible []TaskId
 }
@@ -66,4 +72,5 @@ type WorkflowInvocationResumeRequest struct {
 	client.WorkflowInvocationRequest
 	Plan     OffloadingPlan
 	Progress Progress
+	Data     map[TaskId]TaskData
 }
