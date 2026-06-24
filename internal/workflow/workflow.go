@@ -567,7 +567,7 @@ func (wflow *Workflow) Invoke(r *Request) error {
 				offloadJobId := TaskId(fmt.Sprintf("OFFLOAD_JOB_%v", TasksToOffload[0]))
 				runningTasks[offloadJobId] = true
 
-				dataToOffload := wflow.prepareOffloadData(remoteProgress, dataMap)
+				dataToOffload := wflow.prepareOffloadData(decision, remoteProgress, dataMap)
 
 				go func(jobId TaskId, dec OffloadingDecision) {
 					resultingProgress, nextTasksNotEligible, errOffload := offload(r, &dec, remoteProgress, dataToOffload)
@@ -772,33 +772,15 @@ func (wflow *Workflow) Invoke(r *Request) error {
 					}
 				}
 
-				toSave := false
-
 				if result.out != nil {
 					// Save the output in the local map
 					dataMap[result.tid] = result.out
 
 					finalResultData = result.out
-
-					// If any of the next tasks are scheduled for remote execution, save the current task's data to etcd.
-					for _, nextTask := range result.nextTasks {
-						if r.Plan != nil && !slices.Contains(r.Plan.ToExecute, nextTask) {
-							toSave = true
-							break
-						}
-					}
 				}
 
 				shouldDispatch = len(progress.ReadyToExecute) > 0
 				r.mu.Unlock()
-
-				if toSave {
-					errSave := result.out.Save(requestId, result.tid)
-					if errSave != nil {
-						return fmt.Errorf("Could not save partial data: %v", errSave)
-					}
-				}
-
 			}
 
 			// After processing a result, new tasks may have been added to the readyToExecute queue.
@@ -810,7 +792,7 @@ func (wflow *Workflow) Invoke(r *Request) error {
 	}
 
 	// Save partial data to etcd for tasks assigned to remote nodes, ensuring distributed execution can proceed.
-	if len(r.NextTasksNotEligible) > 0 {
+	if len(progress.ReadyToExecute) > 0 || len(r.NextTasksNotEligible) > 0 {
 		err = wflow.savePartialDataForReadyTasks(r, requestId, progress, dataMap)
 		if err != nil {
 			return fmt.Errorf("Could not save partial data: %v", err)
@@ -893,21 +875,23 @@ func offload(r *Request, policyDecision *OffloadingDecision, progress Progress, 
 
 // prepareOffloadData collects the input data needed for the tasks to be offloaded
 // by retrieving the outputs of their predecessor tasks.
-func (wflow *Workflow) prepareOffloadData(remoteProgress Progress, data map[TaskId]*TaskData) map[TaskId]TaskData {
+func (wflow *Workflow) prepareOffloadData(plan OffloadingDecision, progress Progress, data map[TaskId]*TaskData) map[TaskId]TaskData {
 	dataToOffload := make(map[TaskId]TaskData)
 	handledTasks := make(map[TaskId]bool)
 
-	for _, task := range remoteProgress.ReadyToExecute {
+	for _, task := range plan.ToExecute {
 		for _, prev := range wflow.GetPreviousTasks(task) {
 			if _, found := handledTasks[prev]; found {
 				continue
 			}
 
-			dataToSave, ok := data[prev]
-			if ok {
-				dataToOffload[prev] = *dataToSave
-			} else {
-				// PD not available locally; they might be on Etcd already...
+			if progress.Status[prev] == Executed {
+				dataToSave, ok := data[prev]
+				if ok {
+					dataToOffload[prev] = *dataToSave
+				} else {
+					// PD not available locally; they might be on Etcd already...
+				}
 			}
 
 			handledTasks[prev] = true

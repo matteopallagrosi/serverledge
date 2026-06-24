@@ -446,7 +446,9 @@ func ComputeDecisionFromPlacement(placement TaskPlacement, p *Progress, r *Reque
 
 	nodeToTasks := make(map[string][]TaskId)
 	for t, assignedNode := range placement {
-		nodeToTasks[assignedNode] = append(nodeToTasks[assignedNode], t)
+		if p.Status[t] == Pending {
+			nodeToTasks[assignedNode] = append(nodeToTasks[assignedNode], t)
+		}
 	}
 
 	//Imposta il piano di esecuzione per il nodo locale
