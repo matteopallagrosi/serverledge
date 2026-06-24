@@ -160,10 +160,10 @@ func Visit(workflow *Workflow, taskId TaskId, excludeEnd bool) []Task {
 		switch typedTask := task.(type) {
 		case ConditionalTask:
 			nextTasks = typedTask.GetAlternatives()
-		case UnaryTask:
-			nextTasks = append(nextTasks, typedTask.GetNext())
 		case *ParallelTask:
 			nextTasks = append(nextTasks, typedTask.Branches...)
+		case UnaryTask:
+			nextTasks = append(nextTasks, typedTask.GetNext())
 		case *EndTask:
 			continue
 		default:
@@ -675,18 +675,20 @@ func (wflow *Workflow) Invoke(r *Request) error {
 				}
 			}
 
+			var shouldDispatch bool
+
 			r.mu.Lock()
-			switch rType := res.(type) {
+			switch result := res.(type) {
 
 			case offloadExecutionResult:
 
-				log.Printf("[Rq-%v] Remote offloading completed id: %v", requestId, rType.jobId)
+				log.Printf("[Rq-%v] Remote offloading completed id: %v", requestId, result.jobId)
 
-				remoteProgress := rType.resultingProgress
-				nextNotEligible := rType.nextTasksNotEligible
+				remoteProgress := result.resultingProgress
+				nextNotEligible := result.nextTasksNotEligible
 
 				//Update status only for tasks executed in the offload request
-				for _, task := range rType.executedPlan {
+				for _, task := range result.executedPlan {
 					if progress.Status[task] == Pending {
 						progress.Status[task] = remoteProgress.Status[task]
 					}
@@ -729,17 +731,18 @@ func (wflow *Workflow) Invoke(r *Request) error {
 					log.Printf("[Rq-%v] Workflow has completed on remote node", requestId)
 				}
 
+				shouldDispatch = len(progress.ReadyToExecute) > 0
 				r.mu.Unlock()
 
 			case localExecutionResult:
 
-				log.Printf("[Rq-%v] Executed locally: %s", requestId, rType.tid)
+				log.Printf("[Rq-%v] Executed locally: %s", requestId, result.tid)
 
-				progress.Complete(rType.tid)
+				progress.Complete(result.tid)
 
 				// Check if any previously not eligible tasks were completed during the local execution
 				for i, nid := range remoteNotEligible {
-					if nid == rType.tid {
+					if nid == result.tid {
 						remoteNotEligible = append(remoteNotEligible[:i], remoteNotEligible[i+1:]...)
 						break
 					}
@@ -749,7 +752,7 @@ func (wflow *Workflow) Invoke(r *Request) error {
 				// ensure the completed task is removed from the non-eligible list before returning the report to the coordinator.
 				if r.Resuming {
 					for i, nid := range r.NextTasksNotEligible {
-						if nid == rType.tid {
+						if nid == result.tid {
 							r.NextTasksNotEligible = append(r.NextTasksNotEligible[:i], r.NextTasksNotEligible[i+1:]...)
 							break
 						}
@@ -757,7 +760,7 @@ func (wflow *Workflow) Invoke(r *Request) error {
 				}
 
 				// tasksToExecute contains all next tasks of the just executed task (both eligible and not eligible)
-				for _, nextTask := range rType.nextTasks {
+				for _, nextTask := range result.nextTasks {
 					if r.Resuming && !wflow.IsTaskEligibleForExecution(nextTask, progress) {
 						if !slices.Contains(r.NextTasksNotEligible, nextTask) {
 							r.NextTasksNotEligible = append(r.NextTasksNotEligible, nextTask)
@@ -771,14 +774,14 @@ func (wflow *Workflow) Invoke(r *Request) error {
 
 				toSave := false
 
-				if rType.out != nil {
+				if result.out != nil {
 					// Save the output in the local map
-					dataMap[rType.tid] = rType.out
+					dataMap[result.tid] = result.out
 
-					finalResultData = rType.out
+					finalResultData = result.out
 
 					// If any of the next tasks are scheduled for remote execution, save the current task's data to etcd.
-					for _, nextTask := range rType.nextTasks {
+					for _, nextTask := range result.nextTasks {
 						if r.Plan != nil && !slices.Contains(r.Plan.ToExecute, nextTask) {
 							toSave = true
 							break
@@ -786,10 +789,11 @@ func (wflow *Workflow) Invoke(r *Request) error {
 					}
 				}
 
+				shouldDispatch = len(progress.ReadyToExecute) > 0
 				r.mu.Unlock()
 
 				if toSave {
-					errSave := rType.out.Save(requestId, rType.tid)
+					errSave := result.out.Save(requestId, result.tid)
 					if errSave != nil {
 						return fmt.Errorf("Could not save partial data: %v", errSave)
 					}
@@ -799,7 +803,9 @@ func (wflow *Workflow) Invoke(r *Request) error {
 
 			// After processing a result, new tasks may have been added to the readyToExecute queue.
 			// The dispatcher is then triggered again.
-			triggerDispatch()
+			if shouldDispatch {
+				triggerDispatch()
+			}
 		}
 	}
 

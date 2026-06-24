@@ -105,38 +105,15 @@ func printType(t TaskType) string {
 // Complete sets the progress status of the node with the id input to 'Completed'
 func (p *Progress) Complete(id TaskId) {
 	p.Status[id] = Executed
-
-	// TODO: check for concurrent execution and pop()
-	for i, nid := range p.ReadyToExecute {
-		if nid == id {
-			// pop from the ready queue
-			p.ReadyToExecute = append(p.ReadyToExecute[:i], p.ReadyToExecute[i+1:]...)
-			break
-		}
-	}
 }
 
 func (p *Progress) Skip(id TaskId) {
 	p.Status[id] = Skipped
-
-	for i, nid := range p.ReadyToExecute {
-		if nid == id {
-			p.ReadyToExecute = append(p.ReadyToExecute[:i], p.ReadyToExecute[i+1:]...)
-			break
-		}
-	}
 }
 
-// FailureTask marks a node progress to failed
+// Fail marks node progress to failed
 func (p *Progress) Fail(id TaskId) {
 	p.Status[id] = Failed
-
-	for i, nid := range p.ReadyToExecute {
-		if nid == id {
-			p.ReadyToExecute = append(p.ReadyToExecute[:i], p.ReadyToExecute[i+1:]...)
-			break
-		}
-	}
 }
 
 // InitProgress initialize the progress
