@@ -691,6 +691,14 @@ func (wflow *Workflow) Invoke(r *Request) error {
 				for _, task := range result.executedPlan {
 					if progress.Status[task] == Pending {
 						progress.Status[task] = remoteProgress.Status[task]
+
+						if _, isChoice := wflow.Tasks[task].(*ChoiceTask); isChoice && progress.Status[task] == Executed {
+							for remoteTask, remoteStatus := range remoteProgress.Status {
+								if remoteStatus == Skipped && progress.Status[remoteTask] == Pending {
+									progress.Status[remoteTask] = Skipped
+								}
+							}
+						}
 					}
 				}
 

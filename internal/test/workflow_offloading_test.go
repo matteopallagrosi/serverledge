@@ -141,9 +141,59 @@ func TestMultiNodeOffloadingWorkflow(t *testing.T) {
 
 	wfb4, _ := workflow.NewBuilder().AddPassNodeWithId("", "b4_t1").AddParallelNode([]*workflow.Workflow{wfb5, wfb6}, "b4_t2").AddPassNodeWithId("", "b4_t3").Build()
 
+	innerCond1 := workflow.NewEqParamCondition(workflow.NewParam("n"), workflow.NewValue(0.0))
+	innerCond2 := workflow.NewDiffParamCondition(workflow.NewParam("n"), workflow.NewValue(0.0))
+
+	// 2. Rami dell'Inner Choice
+	innerBranch1Func := func() (*workflow.Workflow, error) {
+		return workflow.NewBuilder().AddPassNodeWithId("", "nested_branch_1").Build()
+	}
+	innerBranch2Func := func() (*workflow.Workflow, error) {
+		return workflow.NewBuilder().AddPassNodeWithId("", "nested_branch_2").Build()
+	}
+
+	// 3. Costruiamo il Workflow Annidato
+	wfb_nested_choice, err := workflow.NewBuilder().
+		AddPassNodeWithId("", "pre_nested_choice"). // Un PassNode prima del choice per gestire meglio l'offloading
+		AddChoiceNode(innerCond1, innerCond2).
+		NextBranch(innerBranch1Func()).
+		NextBranch(innerBranch2Func()).
+		EndChoiceAndBuild()
+	assert.NoError(t, err)
+
+	// Troviamo l'ID del Choice Node annidato per poterlo mettere nel placementPlan
+	var nestedChoiceNodeId workflow.TaskId
+	preNestedChoiceNode, _ := wfb_nested_choice.Find(workflow.TaskId("pre_nested_choice"))
+	nestedChoiceNodeId = preNestedChoiceNode.(workflow.UnaryTask).GetNext()
+
+	branch1Func := func() (*workflow.Workflow, error) {
+		return workflow.NewBuilder().AddPassNodeWithId("", "choice_branch_1").Build()
+	}
+	branch2Func := func() (*workflow.Workflow, error) {
+		return wfb_nested_choice, nil
+	}
+
+	cond1 := workflow.NewDiffParamCondition(workflow.NewParam("n"), workflow.NewValue(0.0))
+	cond2 := workflow.NewEqParamCondition(workflow.NewParam("n"), workflow.NewValue(0.0))
+
+	// 3. Costruiamo il Choice Workflow usando la tua API corretta
+	wfb_choice, err := workflow.NewBuilder().
+		AddPassNodeWithId("", "pre_choice").
+		AddChoiceNode(cond1, cond2).
+		NextBranch(branch1Func()). // Passiamo l'esecuzione del ramo 1 (n == 0)
+		NextBranch(branch2Func()). // Passiamo l'esecuzione del ramo 2 (n != 0)
+		EndChoiceAndBuild()        // Chiudiamo il costrutto e otteniamo il *Workflow
+	assert.NoError(t, err)
+
+	// Per poter targettizzare il nodo Choice nel placementPlan, dobbiamo trovare il suo ID.
+	// Sappiamo che è il nodo successivo a "pre_choice"
+	var choiceNodeId workflow.TaskId
+	preChoiceNode, _ := wfb_choice.Find(workflow.TaskId("pre_choice"))
+	choiceNodeId = preChoiceNode.(workflow.UnaryTask).GetNext()
+
 	// Main workflow
 	wf, err := workflow.NewBuilder().
-		AddParallelNode([]*workflow.Workflow{wfb1, wfb2, wfb3, wfb4}, "parallel").
+		AddParallelNode([]*workflow.Workflow{wfb1, wfb2, wfb3, wfb4, wfb_choice}, "parallel").
 		AddPassNodeWithId("", "pre_final_task").
 		AddPassNodeWithId("", "final_task").
 		Build()
@@ -170,6 +220,12 @@ func TestMultiNodeOffloadingWorkflow(t *testing.T) {
 	placementPlan[workflow.TaskId("b6_t1")] = "C"
 	placementPlan[workflow.TaskId("b6_t2")] = "C"
 	//placementPlan[workflow.TaskId("b4_t3")] = "C"
+	placementPlan[choiceNodeId] = "C"
+	placementPlan[workflow.TaskId("choice_branch_1")] = "B"
+	//placementPlan[workflow.TaskId("choice_branch_2")] = "C"
+	placementPlan[workflow.TaskId("pre_nested_choice")] = "C"
+	placementPlan[nestedChoiceNodeId] = "B"
+	placementPlan[workflow.TaskId("nested_branch_1")] = "C"
 
 	// Save the workflow to etcd so mock nodes can find it
 	err = wf.Save()
@@ -235,10 +291,10 @@ func TestMultiNodeOffloadingWorkflow(t *testing.T) {
 	assert.NotNil(t, request.ExecReport.Result, "Workflow should have completed")
 
 	// Check invocations on mock nodes
-	assert.Equal(t, 3, len(nodeB.invocations), "Node B should have been invoked twice")
+	assert.Equal(t, 4, len(nodeB.invocations), "Node B should have been invoked 4 times")
 	assert.True(t, slices.Contains(nodeB.invocations, "inv_on_B"))
 
-	assert.Equal(t, 3, len(nodeC.invocations), "Node C should have been invoked once")
+	assert.Equal(t, 5, len(nodeC.invocations), "Node C should have been invoked 5 times")
 	assert.True(t, slices.Contains(nodeC.invocations, "inv_on_C"))
 
 	log.Printf("Execution successful. Invocations on B: %v, Invocations on C: %v", nodeB.invocations, nodeC.invocations)
