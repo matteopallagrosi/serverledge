@@ -19,66 +19,78 @@ func (policy *ThresholdBasedPolicy) Init() {
 	maxOffloadedTasks = config.GetInt(config.WORKFLOW_THRESHOLD_BASED_POLICY_MAX_OFFLOADED, 5)
 }
 
-// TODO: oltre ai task offloaded dovrebbe settare local execution per tutti gli altri task in r.Plan.ToExecute (plan locale)
 func (policy *ThresholdBasedPolicy) Evaluate(r *Request, p *Progress) ([]OffloadingDecision, error) {
 
 	if p == nil || !r.CanDoOffloading || len(p.ReadyToExecute) == 0 {
 		return []OffloadingDecision{{Offload: false}}, nil
 	}
 
-	usedMemory := node.LocalResources.UsedMemory()
-	nextTaskId := p.ReadyToExecute[0] // TODO: update in case of parallel branches
-	nextTask := r.W.Tasks[nextTaskId]
+	usedMemory := float64(node.LocalResources.UsedMemory())
+	totalMemory := float64(node.LocalResources.TotalMemory())
 
-	funcTask, ok := nextTask.(*FunctionTask)
-	if !ok {
-		log.Printf("Executing locally non-function task '%s'", nextTaskId)
-		// not a FunctionTask
-		return []OffloadingDecision{{Offload: false}}, nil
+	var localTasks []TaskId
+	var offloadedTasks []TaskId
+	offloadedMemory := int64(0)
+	var nextTasks []TaskId
+
+	for _, tid := range p.ReadyToExecute {
+		task := r.W.Tasks[tid]
+
+		switch typedTask := task.(type) {
+		case *FunctionTask:
+			f, found := function.GetFunction(typedTask.Func)
+			if !found {
+				log.Printf("Could not find function for task %s", tid)
+				localTasks = append(localTasks, tid)
+				continue
+			}
+
+			taskMem := float64(f.MemoryMB)
+			if (usedMemory+taskMem)/totalMemory <= utilizationThreshold {
+				log.Printf("Threshold OK...executing locally %v", tid)
+				// execute locally next task
+				localTasks = append(localTasks, tid)
+				usedMemory += taskMem
+			} else {
+				log.Printf("Threshold violated...must offload %v", tid)
+				// Must offload
+				offloadedTasks = append(offloadedTasks, tid)
+				offloadedMemory += f.MemoryMB
+
+				nextTasks = append(nextTasks, typedTask.NextTask)
+			}
+
+		default:
+			localTasks = append(localTasks, tid)
+		}
 	}
 
-	f, found := function.GetFunction(funcTask.Func)
-	if !found {
-		log.Printf("Could not find function for task %s", nextTaskId)
+	if len(offloadedTasks) == 0 {
+		r.Plan = &OffloadingPlan{ToExecute: localTasks}
 		return []OffloadingDecision{{Offload: false}}, nil
 	}
-
-	if float64(usedMemory+f.MemoryMB)/float64(node.LocalResources.TotalMemory()) <= utilizationThreshold {
-		log.Printf("Threshold OK...executing locally %v", nextTaskId)
-		// execute locally next task
-		return []OffloadingDecision{{Offload: false}}, nil
-	}
-
-	log.Printf("Threshold violated...must offload %v", nextTaskId)
-
-	// Must offload
-	offloadedTasks := make([]TaskId, 1)
-	offloadedTasks[0] = nextTaskId
-	offloadedMemory := f.MemoryMB
-	nextTasks := make([]TaskId, 1)
-	nextTasks[0] = funcTask.NextTask
 
 	for len(offloadedTasks) <= maxOffloadedTasks && len(nextTasks) > 0 {
 		// pop one candidate
-		nextTaskId = nextTasks[0]
+		nextTaskId := nextTasks[0]
 		nextTasks = nextTasks[1:]
 
-		nextTask = r.W.Tasks[nextTaskId]
+		nextTask := r.W.Tasks[nextTaskId]
 		switch typedTask := nextTask.(type) {
 		case *FunctionTask:
-
-			f, found = function.GetFunction(typedTask.Func)
+			f, found := function.GetFunction(typedTask.Func)
 			if !found {
 				log.Printf("Could not find function for task %s", nextTaskId)
-				break
+				continue
 			}
-			if float64(usedMemory+f.MemoryMB)/float64(node.LocalResources.TotalMemory()) > utilizationThreshold {
+			if (usedMemory+float64(f.MemoryMB))/totalMemory > utilizationThreshold {
 				log.Printf("%v also violates threshold", nextTaskId)
 				offloadedMemory += f.MemoryMB
 				offloadedTasks = append(offloadedTasks, nextTaskId)
 
 				// add successors to candidates
 				nextTasks = append(nextTasks, typedTask.NextTask)
+
 			} else {
 				log.Printf("%v does not violate threshold and will be executed locally", nextTaskId)
 			}
@@ -88,10 +100,15 @@ func (policy *ThresholdBasedPolicy) Evaluate(r *Request, p *Progress) ([]Offload
 			for _, tid := range typedTask.GetAlternatives() {
 				nextTasks = append(nextTasks, tid)
 			}
+		case *ParallelTask:
+			log.Printf("%v being added to offloaded group (ParallelTask)", nextTaskId)
+			offloadedTasks = append(offloadedTasks, nextTaskId)
+			for _, tid := range typedTask.Branches {
+				nextTasks = append(nextTasks, tid)
+			}
 		default:
 			// execute locally
 		}
-
 	}
 
 	// Search for a node that can accept offloading
@@ -126,8 +143,12 @@ func (policy *ThresholdBasedPolicy) Evaluate(r *Request, p *Progress) ([]Offload
 
 	if targetNode == nil {
 		log.Printf("No target available for offloading")
+		localTasks = append(localTasks, offloadedTasks...)
+		r.Plan = &OffloadingPlan{ToExecute: localTasks}
 		return []OffloadingDecision{{Offload: false}}, nil
 	}
+
+	r.Plan = &OffloadingPlan{ToExecute: localTasks}
 
 	log.Printf("Offloading %v to %v", offloadedTasks, targetNode)
 	return []OffloadingDecision{{Offload: true, RemoteHost: targetNode.APIUrl(), OffloadingPlan: OffloadingPlan{ToExecute: offloadedTasks}}}, nil
