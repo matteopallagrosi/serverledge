@@ -109,7 +109,7 @@ func newMockNode(t *testing.T, name string, wf *workflow.Workflow) *mockNode {
 		}
 
 		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusOK) // Status 200
+		w.WriteHeader(http.StatusOK)
 		json.NewEncoder(w).Encode(resp)
 	})
 
@@ -133,8 +133,6 @@ func TestMultiNodeOffloadingWorkflow(t *testing.T) {
 		AddPassNodeWithId("", "b3_t2").
 		Build()
 
-	//wfb4, _ := workflow.NewBuilder().AddPassNodeWithId("", "b4_t1").Build()
-
 	wfb5, _ := workflow.NewBuilder().AddPassNodeWithId("", "b5_t1").AddPassNodeWithId("", "b5_t2").Build()
 
 	wfb6, _ := workflow.NewBuilder().AddPassNodeWithId("", "b6_t1").AddPassNodeWithId("", "b6_t2").Build()
@@ -144,7 +142,6 @@ func TestMultiNodeOffloadingWorkflow(t *testing.T) {
 	innerCond1 := workflow.NewEqParamCondition(workflow.NewParam("n"), workflow.NewValue(0.0))
 	innerCond2 := workflow.NewDiffParamCondition(workflow.NewParam("n"), workflow.NewValue(0.0))
 
-	// 2. Rami dell'Inner Choice
 	innerBranch1Func := func() (*workflow.Workflow, error) {
 		return workflow.NewBuilder().AddPassNodeWithId("", "nested_branch_1").Build()
 	}
@@ -152,16 +149,14 @@ func TestMultiNodeOffloadingWorkflow(t *testing.T) {
 		return workflow.NewBuilder().AddPassNodeWithId("", "nested_branch_2").Build()
 	}
 
-	// 3. Costruiamo il Workflow Annidato
 	wfb_nested_choice, err := workflow.NewBuilder().
-		AddPassNodeWithId("", "pre_nested_choice"). // Un PassNode prima del choice per gestire meglio l'offloading
+		AddPassNodeWithId("", "pre_nested_choice").
 		AddChoiceNode(innerCond1, innerCond2).
 		NextBranch(innerBranch1Func()).
 		NextBranch(innerBranch2Func()).
 		EndChoiceAndBuild()
 	assert.NoError(t, err)
 
-	// Troviamo l'ID del Choice Node annidato per poterlo mettere nel placementPlan
 	var nestedChoiceNodeId workflow.TaskId
 	preNestedChoiceNode, _ := wfb_nested_choice.Find(workflow.TaskId("pre_nested_choice"))
 	nestedChoiceNodeId = preNestedChoiceNode.(workflow.UnaryTask).GetNext()
@@ -176,17 +171,14 @@ func TestMultiNodeOffloadingWorkflow(t *testing.T) {
 	cond1 := workflow.NewDiffParamCondition(workflow.NewParam("n"), workflow.NewValue(0.0))
 	cond2 := workflow.NewEqParamCondition(workflow.NewParam("n"), workflow.NewValue(0.0))
 
-	// 3. Costruiamo il Choice Workflow usando la tua API corretta
 	wfb_choice, err := workflow.NewBuilder().
 		AddPassNodeWithId("", "pre_choice").
 		AddChoiceNode(cond1, cond2).
-		NextBranch(branch1Func()). // Passiamo l'esecuzione del ramo 1 (n == 0)
-		NextBranch(branch2Func()). // Passiamo l'esecuzione del ramo 2 (n != 0)
-		EndChoiceAndBuild()        // Chiudiamo il costrutto e otteniamo il *Workflow
+		NextBranch(branch1Func()).
+		NextBranch(branch2Func()).
+		EndChoiceAndBuild()
 	assert.NoError(t, err)
 
-	// Per poter targettizzare il nodo Choice nel placementPlan, dobbiamo trovare il suo ID.
-	// Sappiamo che è il nodo successivo a "pre_choice"
 	var choiceNodeId workflow.TaskId
 	preChoiceNode, _ := wfb_choice.Find(workflow.TaskId("pre_choice"))
 	choiceNodeId = preChoiceNode.(workflow.UnaryTask).GetNext()

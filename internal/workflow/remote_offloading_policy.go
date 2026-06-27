@@ -120,7 +120,6 @@ func tupleKey(s1, s2 string) string {
 	return string(keyBytes)
 }
 
-// TODO: Update this function as soon as tasks that split/merge their inputs are implemented (e.g., Map)
 func computeOutputSize(workflow *Workflow, inputParamsSize float64) map[string]float64 {
 
 	task := workflow.Start
@@ -132,7 +131,8 @@ func computeOutputSize(workflow *Workflow, inputParamsSize float64) map[string]f
 	outputSize := make(map[string]float64)
 	avgOutputSize := metrics.GetMetrics().AvgOutputSize
 
-	var currentInputSize = inputParamsSize
+	inputSizes := make(map[TaskId]float64)
+	inputSizes[task.GetId()] = inputParamsSize
 
 	for len(toVisit) > 0 {
 		task := toVisit[0]
@@ -140,12 +140,16 @@ func computeOutputSize(workflow *Workflow, inputParamsSize float64) map[string]f
 		toVisit = toVisit[1:]
 		visited[task.GetId()] = true
 
+		currentInputSize := inputSizes[task.GetId()]
 		var currentOutputSize float64
 
 		var nextTasks []TaskId
 		switch typedTask := task.(type) {
 		case ConditionalTask:
 			nextTasks = typedTask.GetAlternatives()
+			currentOutputSize = currentInputSize
+		case *ParallelTask:
+			nextTasks = append(nextTasks, typedTask.Branches...)
 			currentOutputSize = currentInputSize
 		case UnaryTask:
 			nextTasks = append(nextTasks, typedTask.GetNext())
@@ -163,6 +167,9 @@ func computeOutputSize(workflow *Workflow, inputParamsSize float64) map[string]f
 		outputSize[string(task.GetId())] = currentOutputSize
 
 		for _, nt := range nextTasks {
+			if _, exists := inputSizes[nt]; !exists {
+				inputSizes[nt] = currentOutputSize
+			}
 			if _, ok := visited[nt]; !ok {
 				nextTask, ok := workflow.Tasks[nt]
 				if ok {
@@ -172,8 +179,6 @@ func computeOutputSize(workflow *Workflow, inputParamsSize float64) map[string]f
 				}
 			}
 		}
-
-		currentInputSize = currentOutputSize
 	}
 
 	return outputSize
@@ -413,7 +418,7 @@ func prepareParameters(r *Request, p *Progress) *remotePolicyParams {
 
 		case *ParallelTask:
 			for _, branchId := range typedTask.Branches {
-				entry := tupleKey(string(branchId), "1.0") // 100% di probabilità
+				entry := tupleKey(string(branchId), "1.0")
 				params.Adj[string(tid)] = append(params.Adj[string(tid)], entry)
 			}
 
@@ -451,7 +456,7 @@ func ComputeDecisionFromPlacement(placement TaskPlacement, p *Progress, r *Reque
 		}
 	}
 
-	//Imposta il piano di esecuzione per il nodo locale
+	// Set the execution plan for the local node
 	r.Plan = &OffloadingPlan{ToExecute: nodeToTasks[localKey]}
 
 	readyRemoteNodes := make(map[string]bool)
@@ -462,10 +467,9 @@ func ComputeDecisionFromPlacement(placement TaskPlacement, p *Progress, r *Reque
 		}
 	}
 
-	// Se la mappa è vuota, significa che tutti i task ready sono per noi (o non ce ne sono)
+	// An empty map implies all ready tasks are designated for local execution
 	if len(readyRemoteNodes) == 0 {
 		log.Println("Continuing with local execution")
-		// Ritorna una slice contenente una singola decisione "vuota/falsa"
 		return []OffloadingDecision{{Offload: false}}
 	}
 
@@ -484,7 +488,7 @@ func ComputeDecisionFromPlacement(placement TaskPlacement, p *Progress, r *Reque
 			continue
 		}
 
-		// Assegniamo al nodo remoto tutti i task che gli spettano dal placement
+		// Assign all tasks to the remote node according to the placement
 		plan := OffloadingPlan{ToExecute: nodeToTasks[remoteNode]}
 
 		decision := OffloadingDecision{
@@ -497,49 +501,4 @@ func ComputeDecisionFromPlacement(placement TaskPlacement, p *Progress, r *Reque
 	}
 
 	return decisions
-
-	/*localTasks := make([]TaskId, 0)
-	for t, assignedNode := range placement {
-		if assignedNode == registration.SelfRegistration.Key {
-			localTasks = append(localTasks, t)
-		}
-	}
-	r.Plan = &OffloadingPlan{ToExecute: localTasks}
-
-	localExecution := true
-
-	var remoteNode string
-	for _, t := range p.ReadyToExecute {
-		assignedNode := placement[t]
-		if assignedNode != registration.SelfRegistration.Key {
-			remoteNode = assignedNode
-			localExecution = false
-			break
-		}
-	}
-
-	if localExecution {
-		log.Println("Continuing with local execution")
-		return OffloadingDecision{Offload: false}
-	}
-
-	// Retrieve all tasks assigned to n
-	toExecute := make([]TaskId, 0)
-	for t, assignedNode := range placement {
-		if assignedNode == remoteNode {
-			toExecute = append(toExecute, t)
-		}
-	}
-
-	plan := OffloadingPlan{ToExecute: toExecute}
-
-	var remoteNodeReg *registration.NodeRegistration
-	if remoteNode == CLOUD {
-		remoteNodeReg = registration.GetRemoteOffloadingTarget()
-	} else {
-		remoteNodeReg = registration.GetPeerFromKey(remoteNode)
-	}
-
-	decision := OffloadingDecision{true, remoteNodeReg.APIUrl(), plan}
-	return decision*/
 }
