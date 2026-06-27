@@ -41,14 +41,14 @@ func (p *testOffloadingPolicy) Evaluate(r *workflow.Request, progress *workflow.
 	return workflow.ComputeDecisionFromPlacement(p.placementPlan, progress, r), nil
 }
 
-// mockNode represents a fake remote Serverledge node that correctly updates workflow progress.
+// mockNode represents a fake remote Serverledge node that correctly updates workflow progress
 type mockNode struct {
 	server      *httptest.Server
 	invocations []string
 	mutex       sync.Mutex
 }
 
-// newMockNode creates and starts a new mock node.
+// newMockNode creates and starts a new mock node
 func newMockNode(t *testing.T, name string, wf *workflow.Workflow) *mockNode {
 	mockServer := &mockNode{}
 	handler := http.HandlerFunc(func(w http.ResponseWriter, reqHTTP *http.Request) {
