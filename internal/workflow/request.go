@@ -27,6 +27,7 @@ type Request struct {
 	Progress             Progress
 	InitialData          map[TaskId]TaskData // optional
 	NextTasksNotEligible []TaskId            // optional
+	OutputData           map[TaskId]TaskData // optional
 
 	mu sync.Mutex // per-execution lock to ensure thread-safe access to shared state
 }
@@ -60,6 +61,7 @@ type InvocationResponse struct {
 type ResumeResponseData struct {
 	ResultingProgress    Progress
 	NextTasksNotEligible []TaskId
+	OutputData           map[TaskId]TaskData
 }
 
 type AsyncInvocationResponse struct {

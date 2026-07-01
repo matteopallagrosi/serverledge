@@ -418,6 +418,7 @@ func (wflow *Workflow) initializeOrRetrieveProgress(r *Request) *Progress {
 
 func (wflow *Workflow) savePartialDataForReadyTasks(r *Request, requestId ReqId, progress *Progress, data map[TaskId]*TaskData) error {
 	handledTasks := make(map[TaskId]bool)
+	outputData := make(map[TaskId]TaskData)
 
 	tasksToSave := append(progress.ReadyToExecute, r.NextTasksNotEligible...)
 
@@ -429,18 +430,16 @@ func (wflow *Workflow) savePartialDataForReadyTasks(r *Request, requestId ReqId,
 
 			dataToSave, ok := data[prev]
 			if ok {
-				err := dataToSave.Save(requestId, prev)
-				if err != nil {
-					return fmt.Errorf("Could not save partial data: %v", err)
-				}
+				outputData[prev] = *dataToSave
 			} else {
-				// PD not available locally; they might be on Etcd already...
+				// PD not available locally
 			}
 
 			handledTasks[prev] = true
 		}
 	}
 
+	r.OutputData = outputData
 	return nil
 }
 
@@ -465,6 +464,7 @@ type offloadExecutionResult struct {
 	resultingProgress    Progress
 	executedPlan         []TaskId
 	nextTasksNotEligible []TaskId
+	outputData           map[TaskId]TaskData
 }
 
 func (o offloadExecutionResult) TaskID() TaskId { return o.jobId }
@@ -570,9 +570,9 @@ func (wflow *Workflow) Invoke(r *Request) error {
 				dataToOffload := wflow.prepareOffloadData(decision, remoteProgress, dataMap)
 
 				go func(jobId TaskId, dec OffloadingDecision) {
-					resultingProgress, nextTasksNotEligible, errOffload := offload(r, &dec, remoteProgress, dataToOffload)
+					resultingProgress, nextTasksNotEligible, outputData, errOffload := offload(r, &dec, remoteProgress, dataToOffload)
 
-					resultChan <- offloadExecutionResult{jobId: jobId, err: errOffload, resultingProgress: resultingProgress, executedPlan: dec.ToExecute, nextTasksNotEligible: nextTasksNotEligible}
+					resultChan <- offloadExecutionResult{jobId: jobId, err: errOffload, resultingProgress: resultingProgress, executedPlan: dec.ToExecute, nextTasksNotEligible: nextTasksNotEligible, outputData: outputData}
 				}(offloadJobId, decision)
 
 				log.Printf("[Rq-%v] Offloading task dispatched remotely", requestId)
@@ -686,6 +686,12 @@ func (wflow *Workflow) Invoke(r *Request) error {
 
 				remoteProgress := result.resultingProgress
 				nextNotEligible := result.nextTasksNotEligible
+
+				// Merge the data retrieved from the remote node into the local map
+				for taskId, taskData := range result.outputData {
+					tData := taskData
+					dataMap[taskId] = &tData
+				}
 
 				//Update status only for tasks executed in the offload request
 				for _, task := range result.executedPlan {
@@ -810,7 +816,7 @@ func (wflow *Workflow) Invoke(r *Request) error {
 	return nil
 }
 
-func offload(r *Request, policyDecision *OffloadingDecision, progress Progress, data map[TaskId]TaskData) (Progress, []TaskId, error) {
+func offload(r *Request, policyDecision *OffloadingDecision, progress Progress, data map[TaskId]TaskData) (Progress, []TaskId, map[TaskId]TaskData, error) {
 
 	log.Printf("[Rq-%v] Offloading decision: %v", r.Id, progress.ReadyToExecute)
 
@@ -832,7 +838,7 @@ func offload(r *Request, policyDecision *OffloadingDecision, progress Progress, 
 
 	invocationBody, err := json.Marshal(request)
 	if err != nil {
-		return Progress{}, nil, fmt.Errorf("JSON marshaling failed: %v", err)
+		return Progress{}, nil, nil, fmt.Errorf("JSON marshaling failed: %v", err)
 	}
 
 	// Send invocation request
@@ -840,25 +846,25 @@ func offload(r *Request, policyDecision *OffloadingDecision, progress Progress, 
 	resp, err := utils.PostJson(url, invocationBody)
 	if err != nil {
 		if resp != nil && resp.StatusCode == http.StatusTooManyRequests {
-			return Progress{}, nil, node.OutOfResourcesErr
+			return Progress{}, nil, nil, node.OutOfResourcesErr
 		} else {
-			return Progress{}, nil, fmt.Errorf("HTTP request for offloading failed: %v", err)
+			return Progress{}, nil, nil, fmt.Errorf("HTTP request for offloading failed: %v", err)
 		}
 	}
 
 	if resp.StatusCode != http.StatusOK {
-		return Progress{}, nil, fmt.Errorf("failed offloaded workflow: %v", err)
+		return Progress{}, nil, nil, fmt.Errorf("failed offloaded workflow: %v", err)
 	}
 
 	var response InvocationResponse
 	body, _ := io.ReadAll(resp.Body)
 	err = json.Unmarshal(body, &response)
 	if err != nil {
-		return Progress{}, nil, fmt.Errorf("Failed InvocationResponse unmarshaling: %v", err)
+		return Progress{}, nil, nil, fmt.Errorf("Failed InvocationResponse unmarshaling: %v", err)
 	}
 
 	if !response.Success {
-		return Progress{}, nil, fmt.Errorf("failed offloaded workflow: %v", err)
+		return Progress{}, nil, nil, fmt.Errorf("failed offloaded workflow: %v", err)
 	}
 
 	r.mu.Lock()
@@ -878,7 +884,7 @@ func offload(r *Request, policyDecision *OffloadingDecision, progress Progress, 
 
 	r.mu.Unlock()
 
-	return response.ResumeData.ResultingProgress, response.ResumeData.NextTasksNotEligible, nil
+	return response.ResumeData.ResultingProgress, response.ResumeData.NextTasksNotEligible, response.ResumeData.OutputData, nil
 }
 
 // prepareOffloadData collects the input data needed for the tasks to be offloaded
@@ -898,7 +904,7 @@ func (wflow *Workflow) prepareOffloadData(plan OffloadingDecision, progress Prog
 				if ok {
 					dataToOffload[prev] = *dataToSave
 				} else {
-					// PD not available locally; they might be on Etcd already...
+					// PD not available locally;
 				}
 			}
 
@@ -1151,7 +1157,6 @@ func findNextOrTerminate(state asl.CanEnd, sm *asl.StateMachine) (asl.State, str
 
 // prepareInput resolves and prepares the input TaskData for a given task before its execution.
 func (wflow *Workflow) prepareInput(taskToExecute TaskId, progress *Progress, dataMap map[TaskId]*TaskData, r *Request) (*TaskData, error) {
-	requestId := ReqId(r.Id)
 
 	if wflow.Tasks[taskToExecute].GetType() == Start {
 		return NewTaskData(r.Params), nil
@@ -1187,12 +1192,7 @@ func (wflow *Workflow) prepareInput(taskToExecute TaskId, progress *Progress, da
 		if parentParallelId != "" {
 			input, found := dataMap[parentParallelId]
 			if !found {
-				var errRet error
-				input, errRet = RetrievePartialData(requestId, parentParallelId)
-				log.Printf("[Rq-%v] Data retrieved from etcd for task %v", r.Id, parentParallelId)
-				if errRet != nil {
-					return nil, fmt.Errorf("could not retrieve partial data for parallel parent %s: %v", parentParallelId, errRet)
-				}
+				return nil, fmt.Errorf("partial data not found for parallel parent %s", parentParallelId)
 			} else {
 				log.Printf("[Rq-%v] Data found locally for task %v", r.Id, parentParallelId)
 			}
@@ -1209,12 +1209,7 @@ func (wflow *Workflow) prepareInput(taskToExecute TaskId, progress *Progress, da
 
 			in, found := dataMap[prevTask]
 			if !found {
-				var err error
-				in, err = RetrievePartialData(ReqId(r.Id), prevTask)
-				log.Printf("[Rq-%v] Data retrieved from etcd for task %v", r.Id, prevTask)
-				if err != nil {
-					return nil, fmt.Errorf("could not retrieve partial data for %s: %v", prevTask, err)
-				}
+				return nil, fmt.Errorf("partial data not found for task %s", prevTask)
 			} else {
 				log.Printf("[Rq-%v] Data found locally for task %v", r.Id, prevTask)
 			}
@@ -1264,17 +1259,12 @@ func (wflow *Workflow) prepareInput(taskToExecute TaskId, progress *Progress, da
 		previousTask := prevTasks[0]
 		input, found := dataMap[previousTask]
 		if !found {
-			var err error
-			input, err = RetrievePartialData(requestId, previousTask)
-			log.Printf("[Rq-%v] Data retrieved from etcd for task %v", r.Id, previousTask)
-			if err != nil {
-				return nil, fmt.Errorf("could not retrieve partial data: %v", err)
-			}
+			return nil, fmt.Errorf("partial data not found for task %s", previousTask)
 		} else {
 			log.Printf("[Rq-%v] Data found locally for task %v", r.Id, previousTask)
 		}
 		return input, nil
 	}
 
-	return nil, fmt.Errorf("nessun predecessore valido per %s", taskToExecute)
+	return nil, fmt.Errorf("no valid predecessor for %s", taskToExecute)
 }

@@ -275,7 +275,7 @@ func handleWorkflowInvocation(e echo.Context, req *workflow.Request) error {
 			Reports:        req.ExecReport.Reports,
 			ResponseTime:   req.ExecReport.ResponseTime,
 			SchedulingTime: req.ExecReport.SchedulingTime,
-			ResumeData:     &workflow.ResumeResponseData{ResultingProgress: req.Progress, NextTasksNotEligible: req.NextTasksNotEligible},
+			ResumeData:     &workflow.ResumeResponseData{ResultingProgress: req.Progress, NextTasksNotEligible: req.NextTasksNotEligible, OutputData: req.OutputData},
 		})
 	}
 }

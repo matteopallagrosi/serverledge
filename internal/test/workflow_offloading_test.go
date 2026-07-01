@@ -105,7 +105,7 @@ func newMockNode(t *testing.T, name string, wf *workflow.Workflow) *mockNode {
 			Reports:        resumeReq.ExecReport.Reports,
 			ResponseTime:   resumeReq.ExecReport.ResponseTime,
 			SchedulingTime: resumeReq.ExecReport.SchedulingTime,
-			ResumeData:     &workflow.ResumeResponseData{ResultingProgress: resumeReq.Progress, NextTasksNotEligible: resumeReq.NextTasksNotEligible},
+			ResumeData:     &workflow.ResumeResponseData{ResultingProgress: resumeReq.Progress, NextTasksNotEligible: resumeReq.NextTasksNotEligible, OutputData: resumeReq.OutputData},
 		}
 
 		w.Header().Set("Content-Type", "application/json")
