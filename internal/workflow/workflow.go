@@ -1170,37 +1170,7 @@ func (wflow *Workflow) prepareInput(taskToExecute TaskId, progress *Progress, da
 		}
 	}
 
-	// Case 1: Initial task of a parallel branch
-	if len(prevTasks) == 0 {
-		var parentParallelId TaskId = ""
-
-		// Find the parent ParallelTask that contains this branch task
-		for _, t := range wflow.Tasks {
-			if pTask, isParallel := t.(*ParallelTask); isParallel {
-				for _, branchTask := range pTask.Branches {
-					if branchTask == taskToExecute {
-						parentParallelId = pTask.GetId()
-						break
-					}
-				}
-			}
-			if parentParallelId != "" {
-				break
-			}
-		}
-
-		if parentParallelId != "" {
-			input, found := dataMap[parentParallelId]
-			if !found {
-				return nil, fmt.Errorf("partial data not found for parallel parent %s", parentParallelId)
-			} else {
-				log.Printf("[Rq-%v] Data found locally for task %v", r.Id, parentParallelId)
-			}
-			return input, nil
-		}
-	}
-
-	// Case 2: Multiple predecessors (logical Fan-In)
+	// Case 1: Multiple predecessors (logical Fan-In)
 	if len(prevTasks) > 1 {
 		mergedResult := make(map[string]interface{})
 		parallelResults := make([]interface{}, len(prevTasks))
@@ -1254,7 +1224,7 @@ func (wflow *Workflow) prepareInput(taskToExecute TaskId, progress *Progress, da
 		return NewTaskData(mergedResult), nil
 	}
 
-	// Case 3: single predecessor
+	// Case 2: single predecessor
 	if len(prevTasks) == 1 {
 		previousTask := prevTasks[0]
 		input, found := dataMap[previousTask]
