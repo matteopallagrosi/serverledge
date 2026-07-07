@@ -16,7 +16,7 @@ func (policy *HEFTlessPolicy) Init() {
 
 }
 
-func (policy *HEFTlessPolicy) Evaluate(r *Request, p *Progress) ([]OffloadingDecision, error) {
+func (policy *HEFTlessPolicy) Evaluate(r *Request, p *Progress, runningTasks map[TaskId]bool) ([]OffloadingDecision, error) {
 
 	completed := 0
 

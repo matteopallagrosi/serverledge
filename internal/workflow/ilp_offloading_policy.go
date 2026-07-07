@@ -16,7 +16,7 @@ type IlpOffloadingPolicy struct{}
 func (policy *IlpOffloadingPolicy) Init() {
 }
 
-func (policy *IlpOffloadingPolicy) Evaluate(r *Request, p *Progress) ([]OffloadingDecision, error) {
+func (policy *IlpOffloadingPolicy) Evaluate(r *Request, p *Progress, runningTasks map[TaskId]bool) ([]OffloadingDecision, error) {
 
 	completed := 0
 

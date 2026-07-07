@@ -33,7 +33,7 @@ type testOffloadingPolicy struct {
 
 func (p *testOffloadingPolicy) Init() {}
 
-func (p *testOffloadingPolicy) Evaluate(r *workflow.Request, progress *workflow.Progress) ([]workflow.OffloadingDecision, error) {
+func (p *testOffloadingPolicy) Evaluate(r *workflow.Request, progress *workflow.Progress, runningTasks map[workflow.TaskId]bool) ([]workflow.OffloadingDecision, error) {
 	if !r.CanDoOffloading {
 		return []workflow.OffloadingDecision{{Offload: false}}, nil
 	}

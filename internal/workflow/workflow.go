@@ -38,6 +38,8 @@ func CreateOffloadingPolicy() {
 		offloadingPolicy = &HEFTlessPolicy{}
 	} else if policyConf == "threshold" {
 		offloadingPolicy = &ThresholdBasedPolicy{}
+	} else if policyConf == "adaptive" {
+		offloadingPolicy = &AdaptiveOffloadingPolicy{}
 	} else { // default, disable offloading
 		offloadingPolicy = &NoOffloadingPolicy{}
 	}
@@ -525,7 +527,7 @@ func (wflow *Workflow) Invoke(r *Request) error {
 		}
 
 		t0 := time.Now()
-		decisions, err := offloadingPolicy.Evaluate(r, progress)
+		decisions, err := offloadingPolicy.Evaluate(r, progress, runningTasks)
 		policyTime := time.Since(t0).Seconds()
 		r.ExecReport.SchedulingTime += policyTime
 

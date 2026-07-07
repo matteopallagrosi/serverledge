@@ -19,7 +19,7 @@ func (policy *ThresholdBasedPolicy) Init() {
 	maxOffloadedTasks = config.GetInt(config.WORKFLOW_THRESHOLD_BASED_POLICY_MAX_OFFLOADED, 5)
 }
 
-func (policy *ThresholdBasedPolicy) Evaluate(r *Request, p *Progress) ([]OffloadingDecision, error) {
+func (policy *ThresholdBasedPolicy) Evaluate(r *Request, p *Progress, runningTasks map[TaskId]bool) ([]OffloadingDecision, error) {
 
 	if p == nil || !r.CanDoOffloading || len(p.ReadyToExecute) == 0 {
 		return []OffloadingDecision{{Offload: false}}, nil
