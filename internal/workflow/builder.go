@@ -10,13 +10,12 @@ import (
 // Use NewBuilder() to safely initialize it. Then use the available methods to iteratively build the workflow.
 // Finally use Build() to get the complete Workflow.
 type Builder struct {
-	workflow            Workflow
-	branches            int
-	prevNode            Task
-	errors              []error
-	BranchNumber        int
-	fanInPredecessors   []Task        // Terminal nodes of parallel branches that need to be joined (Fan-In)
-	pendingParallelTask *ParallelTask // The ParallelTask node awaiting its 'Next' task to be set
+	workflow          Workflow
+	branches          int
+	prevNode          Task
+	errors            []error
+	BranchNumber      int
+	fanInPredecessors []Task // Terminal nodes of parallel branches that need to be joined (Fan-In)
 }
 
 func (b *Builder) appendError(err error) {
@@ -368,7 +367,6 @@ func (b *Builder) AddParallelNode(branches []*Workflow, id string) *Builder {
 		return b
 	}
 
-	var branchStartIds []TaskId
 	var branchEndNodes []Task
 
 	for _, branchWf := range branches {
@@ -378,7 +376,10 @@ func (b *Builder) AddParallelNode(branches []*Workflow, id string) *Builder {
 
 		startNextId := branchWf.Start.GetNext()
 		if startNextId != branchWf.End.GetId() {
-			branchStartIds = append(branchStartIds, startNextId)
+			startNextTask, _ := branchWf.Find(startNextId)
+			if startNextTask != nil {
+				_ = parallelNode.AddBranch(startNextTask)
+			}
 		}
 
 		// Copy all tasks in the main workflow
@@ -396,11 +397,8 @@ func (b *Builder) AddParallelNode(branches []*Workflow, id string) *Builder {
 		}
 	}
 
-	parallelNode.Branches = branchStartIds
-
 	b.prevNode = nil
 	b.fanInPredecessors = branchEndNodes
-	b.pendingParallelTask = parallelNode
 
 	return b
 
@@ -451,12 +449,7 @@ func (b *Builder) chainToNext(newNode Task) error {
 			}
 		}
 
-		if b.pendingParallelTask != nil {
-			b.pendingParallelTask.Next = newNode.GetId()
-		}
-
 		b.fanInPredecessors = nil
-		b.pendingParallelTask = nil
 		return nil
 	}
 

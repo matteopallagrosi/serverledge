@@ -39,6 +39,12 @@ type ConditionalTask interface {
 	Evaluate(data *TaskData, r *Request) (TaskId, error)
 }
 
+type FanOutTask interface {
+	Task
+	AddBranch(nextTask Task) error
+	GetBranches() []TaskId
+}
+
 type baseTask struct {
 	Id   TaskId
 	Type TaskType

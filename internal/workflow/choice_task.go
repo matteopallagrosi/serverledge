@@ -3,6 +3,7 @@ package workflow
 import (
 	"errors"
 	"fmt"
+
 	"github.com/lithammer/shortuuid"
 )
 
@@ -36,16 +37,16 @@ func (c *ChoiceTask) Evaluate(input *TaskData, r *Request) (TaskId, error) {
 
 	// simply evaluate the Conditions and set the matching one
 	matchedCondition := -1
-	var extendedInputs = make(map[string]interface{})
+	/*var extendedInputs = make(map[string]interface{})
 	for k, v := range r.Params {
 		extendedInputs[k] = v
 	}
 	for k, v := range input.Data {
 		extendedInputs[k] = v
-	}
+	}*/
 
 	for i, condition := range c.Conditions {
-		ok, err := condition.Evaluate(extendedInputs)
+		ok, err := condition.Evaluate(input.Data)
 		if err != nil {
 			return "", fmt.Errorf("error while testing condition: %v", err)
 		}

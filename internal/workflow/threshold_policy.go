@@ -100,10 +100,10 @@ func (policy *ThresholdBasedPolicy) Evaluate(r *Request, p *Progress, runningTas
 			for _, tid := range typedTask.GetAlternatives() {
 				nextTasks = append(nextTasks, tid)
 			}
-		case *ParallelTask:
+		case FanOutTask:
 			log.Printf("%v being added to offloaded group (ParallelTask)", nextTaskId)
 			offloadedTasks = append(offloadedTasks, nextTaskId)
-			for _, tid := range typedTask.Branches {
+			for _, tid := range typedTask.GetBranches() {
 				nextTasks = append(nextTasks, tid)
 			}
 		default:

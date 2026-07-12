@@ -148,8 +148,8 @@ func computeOutputSize(workflow *Workflow, inputParamsSize float64) map[string]f
 		case ConditionalTask:
 			nextTasks = typedTask.GetAlternatives()
 			currentOutputSize = currentInputSize
-		case *ParallelTask:
-			nextTasks = append(nextTasks, typedTask.Branches...)
+		case FanOutTask:
+			nextTasks = append(nextTasks, typedTask.GetBranches()...)
 			currentOutputSize = currentInputSize
 		case UnaryTask:
 			nextTasks = append(nextTasks, typedTask.GetNext())
@@ -416,8 +416,8 @@ func prepareParameters(r *Request, p *Progress) *remotePolicyParams {
 			}
 			params.TaskMemory[string(tid)] = float64(10)
 
-		case *ParallelTask:
-			for _, branchId := range typedTask.Branches {
+		case FanOutTask:
+			for _, branchId := range typedTask.GetBranches() {
 				entry := tupleKey(string(branchId), "1.0")
 				params.Adj[string(tid)] = append(params.Adj[string(tid)], entry)
 			}

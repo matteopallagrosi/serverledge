@@ -33,7 +33,7 @@ func IsReferencePath(valpar interface{}) bool {
 			fmt.Printf("this should never happen: parameter has kind string, but is not a string")
 			return false
 		}
-		return s == "$" || (strings.HasPrefix(s, "$.") && len(s) > 2)
+		return s == "$" || (strings.HasPrefix(s, "$.") && len(s) > 2 || (strings.HasPrefix(s, "$[") && len(s) > 2))
 	}
 	return false
 }

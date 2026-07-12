@@ -118,8 +118,8 @@ func (wflow *Workflow) computePreviousTasks() {
 		switch typedTask := task.(type) {
 		case ConditionalTask:
 			nextTasks = typedTask.GetAlternatives()
-		case *ParallelTask:
-			nextTasks = append(nextTasks, typedTask.Branches...)
+		case FanOutTask:
+			nextTasks = append(nextTasks, typedTask.GetBranches()...)
 		case UnaryTask:
 			nextTasks = append(nextTasks, typedTask.GetNext())
 		case *EndTask:
@@ -162,8 +162,8 @@ func Visit(workflow *Workflow, taskId TaskId, excludeEnd bool) []Task {
 		switch typedTask := task.(type) {
 		case ConditionalTask:
 			nextTasks = typedTask.GetAlternatives()
-		case *ParallelTask:
-			nextTasks = append(nextTasks, typedTask.Branches...)
+		case FanOutTask:
+			nextTasks = append(nextTasks, typedTask.GetBranches()...)
 		case UnaryTask:
 			nextTasks = append(nextTasks, typedTask.GetNext())
 		case *EndTask:
@@ -233,14 +233,8 @@ func (wflow *Workflow) ExecuteTask(r *Request, taskToExecute TaskId, input *Task
 		outputData = NewTaskData(output)
 		//progress.Complete(task.GetId())
 
-		if pTask, isParallel := task.(*ParallelTask); isParallel {
-			for _, nextTask := range pTask.Branches {
-				nextTasks = append(nextTasks, nextTask)
-			}
-		} else {
-			nextTask := task.GetNext()
-			nextTasks = append(nextTasks, nextTask)
-		}
+		nextTask := task.GetNext()
+		nextTasks = append(nextTasks, nextTask)
 
 	case ConditionalTask:
 		nextTaskId, err := task.Evaluate(input, r)
@@ -279,6 +273,13 @@ func (wflow *Workflow) ExecuteTask(r *Request, taskToExecute TaskId, input *Task
 		if metrics.Enabled {
 			metrics.AddBranchCount(string(task.GetId()), string(nextTaskId))
 		}
+	case FanOutTask:
+		outputData = NewTaskData(input.Data)
+
+		for _, nextTask := range task.GetBranches() {
+			nextTasks = append(nextTasks, nextTask)
+		}
+
 	case *EndTask:
 		r.mu.Lock()
 		defer r.mu.Unlock()
