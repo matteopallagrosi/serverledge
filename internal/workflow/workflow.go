@@ -38,8 +38,6 @@ func CreateOffloadingPolicy() {
 		offloadingPolicy = &HEFTlessPolicy{}
 	} else if policyConf == "threshold" {
 		offloadingPolicy = &ThresholdBasedPolicy{}
-	} else if policyConf == "adaptive" {
-		offloadingPolicy = &AdaptiveOffloadingPolicy{}
 	} else { // default, disable offloading
 		offloadingPolicy = &NoOffloadingPolicy{}
 	}
