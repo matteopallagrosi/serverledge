@@ -31,12 +31,24 @@ func (policy *IlpOffloadingPolicy) Evaluate(r *Request, p *Progress, runningTask
 	}
 
 	if completed > 0 {
-		placement, found := getCachedSolution(r)
-		if found {
-			log.Printf("Reusing cached placement\n")
-			return ComputeDecisionFromPlacement(*placement, p, r), nil
+		placement, isValid, exists := getCachedSolution(r)
+		if exists {
+			if isValid {
+				// TTL > 0
+				log.Printf("Reusing cached placement\n")
+				return ComputeDecisionFromPlacement(*placement, p, r), nil
+				// TTL == 0 but there are running tasks, so the placement cannot be recalculated
+			} else if len(runningTasks) > 0 {
+				log.Printf("Cache TTL expired for %s, but system is busy (%d running tasks). Reusing previous placement.\n", r.W.Name, len(runningTasks))
+				return ComputeDecisionFromPlacement(*placement, p, r), nil
+			}
+		} else if len(runningTasks) > 0 {
+			log.Printf("No placement found and system is busy. Defaulting to local execution.\n")
+			return []OffloadingDecision{{Offload: false}}, nil
 		}
 	}
+
+	log.Printf("System at rest. Calculating optimal placement for %s.\n", r.W.Name)
 
 	params := prepareParameters(r, p)
 

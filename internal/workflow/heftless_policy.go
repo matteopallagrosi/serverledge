@@ -31,9 +31,13 @@ func (policy *HEFTlessPolicy) Evaluate(r *Request, p *Progress, runningTasks map
 	}
 
 	if completed > 0 {
-		placement, found := getCachedSolution(r)
-		if found {
-			log.Printf("Reusing cached placement\n")
+		placement, isValid, exists := getCachedSolution(r)
+		if exists {
+			if !isValid {
+				log.Printf("Warning: Cached placement TTL expired, but HEFTless does not support re-scheduling. Reusing it anyway.\n")
+			} else {
+				log.Printf("Reusing cached placement\n")
+			}
 			return ComputeDecisionFromPlacement(*placement, p, r), nil
 		} else {
 			// No rescheduling admitted

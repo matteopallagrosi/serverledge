@@ -77,28 +77,31 @@ type cachedPlacement struct {
 var placementCacheMutex sync.Mutex = sync.Mutex{}
 var placementCache map[string]*cachedPlacement
 
-func getCachedSolution(r *Request) (*TaskPlacement, bool) {
+// getCachedSolution returns the cached solution for the given request, if any.
+// If the solution is not cached, it returns nil, false, false.
+// If the solution is cached and valid, it returns the solution, true, true.
+// If the solution is cached but expired, it returns the solution, false, true.
+func getCachedSolution(r *Request) (*TaskPlacement, bool, bool) {
 	placementCacheMutex.Lock()
 	defer placementCacheMutex.Unlock()
 
 	if placementCache == nil {
 		placementCache = make(map[string]*cachedPlacement)
-		return nil, false
+		return nil, false, false
 	}
 
 	sol, ok := placementCache[r.Id]
 	if !ok {
-		return nil, false
+		return nil, false, false
 	}
 
 	// check TTL
-	if sol.ttl > 0 {
+	isValid := sol.ttl > 0
+	if isValid {
 		sol.ttl--
-		return &sol.placement, ok
 	}
 
-	delete(placementCache, r.Id)
-	return nil, false
+	return &sol.placement, isValid, true
 }
 
 func cacheSolution(r *Request, sol *TaskPlacement, ttl int) {
