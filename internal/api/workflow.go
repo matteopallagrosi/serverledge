@@ -269,13 +269,22 @@ func handleWorkflowInvocation(e echo.Context, req *workflow.Request) error {
 		log.Printf("[Rq-%v] Invocation succeeded", req.Id)
 		req.ExecReport.ResponseTime = time.Now().Sub(req.Arrival).Seconds()
 
+		var resData *workflow.ResumeResponseData
+		if req.Resuming {
+			resData = &workflow.ResumeResponseData{
+				ResultingProgress:    req.Progress,
+				NextTasksNotEligible: req.NextTasksNotEligible,
+				OutputData:           req.OutputData,
+			}
+		}
+
 		return e.JSON(http.StatusOK, workflow.InvocationResponse{
 			Success:        true,
 			Result:         req.ExecReport.Result,
 			Reports:        req.ExecReport.Reports,
 			ResponseTime:   req.ExecReport.ResponseTime,
 			SchedulingTime: req.ExecReport.SchedulingTime,
-			ResumeData:     &workflow.ResumeResponseData{ResultingProgress: req.Progress, NextTasksNotEligible: req.NextTasksNotEligible, OutputData: req.OutputData},
+			ResumeData:     resData,
 		})
 	}
 }
