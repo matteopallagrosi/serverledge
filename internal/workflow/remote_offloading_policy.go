@@ -24,6 +24,7 @@ type remotePolicyParams struct {
 	EdgeNodes           []string            `json:"edge_nodes"`            // Set of Edge nodes
 	NodeAvailableMemory map[string]float64  `json:"node_available_memory"` // Available memory per node
 	NodeFreeMemory      map[string]float64  `json:"node_free_memory"`      // Free memory per node
+	NodeAvailableCPUs   map[string]float64  `json:"node_available_cpus"`   // Available CPUs per node
 	DSLatency           map[string]float64  `json:"ds_latency"`            // Latency per node
 	DSBandwidth         map[string]float64  `json:"ds_bandwidth"`          // Bandwidth per node
 	NodeLatency         map[string]float64  `json:"node_latency"`          // map[json.dumps((src_node, dst_node))] = latency
@@ -31,6 +32,7 @@ type remotePolicyParams struct {
 	T                   []string            `json:"T"`           // Set of tasks
 	Adj                 map[string][]string `json:"adj"`         // Task adjacency list
 	TaskMemory          map[string]float64  `json:"task_memory"` // Memory per task
+	TaskCPUs            map[string]float64  `json:"task_cpus"`   // CPUs per task
 	Deadline            float64             `json:"deadline"`    // Global deadline
 	OutputSize          map[string]float64  `json:"output_size"` // Output size per task
 	InputSize           float64             `json:"input_size"`  // Input data size
@@ -54,8 +56,10 @@ func initParams() remotePolicyParams {
 		OutputSize:          make(map[string]float64),
 		NodeAvailableMemory: make(map[string]float64),
 		NodeFreeMemory:      make(map[string]float64),
+		NodeAvailableCPUs:   make(map[string]float64),
 		Cost:                make(map[string]float64),
 		TaskMemory:          make(map[string]float64),
+		TaskCPUs:            make(map[string]float64),
 		NodeLabels:          make(map[string][]string),
 		TaskLabels:          make(map[string][]string),
 		DSBandwidth:         make(map[string]float64),
@@ -201,6 +205,7 @@ func prepareParameters(r *Request, p *Progress) *remotePolicyParams {
 	params.HandlingNode = LOCAL
 	params.NodeAvailableMemory[LOCAL] = (float64)(node.LocalResources.AvailableMemory())
 	params.NodeFreeMemory[LOCAL] = (float64)(node.LocalResources.FreeMemory())
+	params.NodeAvailableCPUs[LOCAL] = node.LocalResources.AvailableCPUs()
 
 	wViolations := config.GetFloat(config.WORKFLOW_OFFLOADING_POLICY_ILP_OBJ_WEIGHT_VIOLATIONS, 0.3)
 	wDataTransfers := config.GetFloat(config.WORKFLOW_OFFLOADING_POLICY_ILP_OBJ_WEIGHT_DATA_TRANSFERS, 0.3)
@@ -226,6 +231,7 @@ func prepareParameters(r *Request, p *Progress) *remotePolicyParams {
 				params.EdgeNodes = append(params.EdgeNodes, k)
 				params.NodeAvailableMemory[k] = float64(v.AvailableMemory)
 				params.NodeFreeMemory[k] = float64(v.FreeMemory)
+				params.NodeAvailableCPUs[k] = v.TotalCPU - v.UsedCPU
 
 				// Cost (assuming that Edge nodes are all in the same area)
 				params.Cost[k] = localCost
@@ -418,6 +424,7 @@ func prepareParameters(r *Request, p *Progress) *remotePolicyParams {
 				params.Adj[string(tid)] = append(params.Adj[string(tid)], entry)
 			}
 			params.TaskMemory[string(tid)] = float64(10)
+			params.TaskCPUs[string(tid)] = 0.01
 
 		case FanOutTask:
 			for _, branchId := range typedTask.GetBranches() {
@@ -426,6 +433,7 @@ func prepareParameters(r *Request, p *Progress) *remotePolicyParams {
 			}
 
 			params.TaskMemory[string(tid)] = float64(10)
+			params.TaskCPUs[string(tid)] = 0.01
 
 		case UnaryTask:
 			nextTid := string(typedTask.GetNext())
@@ -436,12 +444,15 @@ func prepareParameters(r *Request, p *Progress) *remotePolicyParams {
 			if ok {
 				f, _ := function.GetFunction(ft.Func)
 				params.TaskMemory[string(tid)] = float64(f.MemoryMB)
+				params.TaskCPUs[string(tid)] = f.CPUDemand
 			} else {
 				params.TaskMemory[string(tid)] = float64(10)
+				params.TaskCPUs[string(tid)] = 0.01
 			}
 
 		default:
 			params.TaskMemory[string(tid)] = float64(10)
+			params.TaskCPUs[string(tid)] = 0.01
 		}
 
 	}
