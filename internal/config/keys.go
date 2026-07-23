@@ -151,6 +151,8 @@ const WORKFLOW_OFFLOADING_POLICY_NODE_TO_DATA_STORE_BANDWIDTH = "workflow.offloa
 // Estimated bandwidth between cloud nodes and the data store
 const WORKFLOW_OFFLOADING_POLICY_CLOUD_TO_DATA_STORE_BANDWIDTH = "workflow.offloading.policy.cloud2datastore.bandwidth"
 
+const WORKFLOW_OFFLOADING_POLICY_EDGE_TO_EDGE_BANDWIDTH = "workflow.offloading.policy.edge_to_edge_bandwidth"
+
 // Utilization threshold for the threshold-based offloading policy
 const WORKFLOW_THRESHOLD_BASED_POLICY_THRESHOLD = "workflow.offloading.policy.threshold"
 

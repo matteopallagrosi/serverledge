@@ -28,6 +28,7 @@ type remotePolicyParams struct {
 	DSLatency           map[string]float64  `json:"ds_latency"`            // Latency per node
 	DSBandwidth         map[string]float64  `json:"ds_bandwidth"`          // Bandwidth per node
 	NodeLatency         map[string]float64  `json:"node_latency"`          // map[json.dumps((src_node, dst_node))] = latency
+	NodeBandwidth       map[string]float64  `json:"node_bandwidth"`
 	HandlingNode        string              `json:"handling_node"`
 	T                   []string            `json:"T"`           // Set of tasks
 	Adj                 map[string][]string `json:"adj"`         // Task adjacency list
@@ -65,6 +66,7 @@ func initParams() remotePolicyParams {
 		DSBandwidth:         make(map[string]float64),
 		DSLatency:           make(map[string]float64),
 		NodeLatency:         make(map[string]float64),
+		NodeBandwidth:       make(map[string]float64),
 		ObjWeights:          []float64{0.33, 0.33, 0.33},
 	}
 }
@@ -239,6 +241,8 @@ func prepareParameters(r *Request, p *Progress) *remotePolicyParams {
 		}
 	}
 
+	edgeToEdgeBandwidth := config.GetFloat(config.WORKFLOW_OFFLOADING_POLICY_EDGE_TO_EDGE_BANDWIDTH, 100.0)
+
 	// Compute distances
 	for key1, v1 := range nearbyServers {
 		var distance float64
@@ -248,6 +252,9 @@ func prepareParameters(r *Request, p *Progress) *remotePolicyParams {
 		distance = registration.VivaldiClient.DistanceTo(&v1.Coordinates).Seconds() / 2
 		params.NodeLatency[tupleKey(LOCAL, key1)] = distance
 		params.NodeLatency[tupleKey(key1, LOCAL)] = distance
+
+		params.NodeBandwidth[tupleKey(LOCAL, key1)] = edgeToEdgeBandwidth
+		params.NodeBandwidth[tupleKey(key1, LOCAL)] = edgeToEdgeBandwidth
 
 		for key2, v2 := range nearbyServers {
 			if !slices.Contains(params.EdgeNodes, key2) {
@@ -260,8 +267,13 @@ func prepareParameters(r *Request, p *Progress) *remotePolicyParams {
 			}
 			params.NodeLatency[tupleKey(key1, key2)] = distance
 			params.NodeLatency[tupleKey(key2, key1)] = distance
+
+			params.NodeBandwidth[tupleKey(key1, key2)] = edgeToEdgeBandwidth
+			params.NodeBandwidth[tupleKey(key2, key1)] = edgeToEdgeBandwidth
 		}
 	}
+
+	dsBandwidth := config.GetFloat(config.WORKFLOW_OFFLOADING_POLICY_NODE_TO_DATA_STORE_BANDWIDTH, 40.0)
 
 	if len(params.CloudNodes) > 0 {
 		// Cost
@@ -280,6 +292,9 @@ func prepareParameters(r *Request, p *Progress) *remotePolicyParams {
 
 			// TODO: we assume distance to Cloud == distance to DS (for all Edge nodes)
 			params.DSLatency[n] = distanceToCloud
+
+			params.NodeBandwidth[tupleKey(n, CLOUD)] = dsBandwidth
+			params.NodeBandwidth[tupleKey(CLOUD, n)] = dsBandwidth
 		}
 		params.NodeLatency[tupleKey(CLOUD, CLOUD)] = 0.0
 		params.DSLatency[CLOUD] = 0.001
@@ -291,7 +306,6 @@ func prepareParameters(r *Request, p *Progress) *remotePolicyParams {
 	}
 
 	// Bandwidth (we assume identical)
-	dsBandwidth := config.GetFloat(config.WORKFLOW_OFFLOADING_POLICY_NODE_TO_DATA_STORE_BANDWIDTH, 40.0)
 	for _, n := range params.EdgeNodes {
 		params.DSBandwidth[n] = dsBandwidth
 	}
