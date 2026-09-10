@@ -655,11 +655,16 @@ func (wflow *Workflow) Invoke(r *Request) error {
 				log.Printf("Nil input for task: %s", taskToExecute)
 			}
 
+			var actualInput *TaskData
+			if input != nil {
+				actualInput = NewTaskData(maps.Clone(input.Data))
+			}
+
 			go func(t TaskId, in *TaskData) {
 				out, nextTasks, execErr := wflow.ExecuteTask(r, t, in, progress)
 
 				resultChan <- localExecutionResult{tid: t, out: out, err: execErr, nextTasks: nextTasks}
-			}(taskToExecute, input)
+			}(taskToExecute, actualInput)
 
 		case res := <-resultChan:
 
@@ -1209,7 +1214,7 @@ func (wflow *Workflow) prepareInput(taskToExecute TaskId, progress *Progress, da
 		delete(mergedResult, "parallel_results")
 
 		// Positional mapping
-		expectedInputs := funct.Signature.GetInputs()
+		/*expectedInputs := funct.Signature.GetInputs()
 		for i, res := range parallelResults {
 			if i < len(expectedInputs) {
 				targetParamName := expectedInputs[i].Name
@@ -1217,6 +1222,25 @@ func (wflow *Workflow) prepareInput(taskToExecute TaskId, progress *Progress, da
 					for _, val := range resMap {
 						mergedResult[targetParamName] = val
 						break
+					}
+				}
+			}
+		}*/
+
+		expectedInputs := funct.Signature.GetInputs()
+
+		// Creazione di una mappa degli input attesi per il matching nominale
+		expectedMap := make(map[string]bool)
+		for _, input := range expectedInputs {
+			expectedMap[input.Name] = true
+		}
+
+		// Estrazione e assegnazione basata sul nome della chiave, ignorando la posizione
+		for _, res := range parallelResults {
+			if resMap, ok := res.(map[string]interface{}); ok {
+				for key, val := range resMap {
+					if expectedMap[key] {
+						mergedResult[key] = val
 					}
 				}
 			}
