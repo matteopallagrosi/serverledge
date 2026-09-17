@@ -4,10 +4,11 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"github.com/serverledge-faas/serverledge/internal/registration"
 	"log"
 	"os"
 	"time"
+
+	"github.com/serverledge-faas/serverledge/internal/registration"
 
 	"github.com/prometheus/common/model"
 	"github.com/serverledge-faas/serverledge/internal/config"
@@ -241,7 +242,7 @@ func MetricsRetriever() {
 				retrievedMetrics.AvgRemoteInitTime = make(map[string]float64)
 			}
 
-			fmt.Println(retrievedMetrics)
+			//fmt.Println(retrievedMetrics)
 
 			// TODO: configuration option
 			metricsJsonFilename := config.GetString(config.METRICS_DUMP_JSON_FILE, "")
