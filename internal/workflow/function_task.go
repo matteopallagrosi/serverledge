@@ -4,10 +4,11 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"github.com/serverledge-faas/serverledge/internal/config"
 	"log"
 	"os"
 	"time"
+
+	"github.com/serverledge-faas/serverledge/internal/config"
 
 	"github.com/serverledge-faas/serverledge/internal/node"
 
@@ -143,6 +144,8 @@ func (s *FunctionTask) exec(compRequest *Request, params ...map[string]interface
 			}
 		}
 	}
+
+	report.Result = ""
 
 	// saving execution report for this function
 	compRequest.ExecReport.Reports[CreateExecutionReportId(s)] = report
