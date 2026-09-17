@@ -699,6 +699,8 @@ func (wflow *Workflow) Invoke(r *Request) error {
 					dataMap[taskId] = &tData
 				}
 
+				finalResultData = nil
+
 				//Update status only for tasks executed in the offload request
 				for _, task := range result.executedPlan {
 					if progress.Status[task] == Pending {
