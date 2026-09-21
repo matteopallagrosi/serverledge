@@ -813,7 +813,7 @@ func (wflow *Workflow) Invoke(r *Request) error {
 		}
 	}
 
-	// Save partial data to etcd for tasks assigned to remote nodes, ensuring distributed execution can proceed.
+	// Save partial data for tasks assigned to remote nodes, ensuring distributed execution can proceed.
 	if len(progress.ReadyToExecute) > 0 || len(r.NextTasksNotEligible) > 0 {
 		err = wflow.savePartialDataForReadyTasks(r, requestId, progress, dataMap)
 		if err != nil {
