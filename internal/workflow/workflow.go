@@ -783,6 +783,9 @@ func (wflow *Workflow) Invoke(r *Request) error {
 
 				// tasksToExecute contains all next tasks of the just executed task (both eligible and not eligible)
 				for _, nextTask := range result.nextTasks {
+					if nextTask == "" {
+						continue
+					}
 					if r.Resuming && !wflow.IsTaskEligibleForExecution(nextTask, progress) {
 						if !slices.Contains(r.NextTasksNotEligible, nextTask) {
 							r.NextTasksNotEligible = append(r.NextTasksNotEligible, nextTask)
@@ -1165,8 +1168,12 @@ func findNextOrTerminate(state asl.CanEnd, sm *asl.StateMachine) (asl.State, str
 
 // prepareInput resolves and prepares the input TaskData for a given task before its execution.
 func (wflow *Workflow) prepareInput(taskToExecute TaskId, progress *Progress, dataMap map[TaskId]*TaskData, r *Request) (*TaskData, error) {
+	task, ok := wflow.Tasks[taskToExecute]
+	if !ok || task == nil {
+		return nil, fmt.Errorf("task '%s' does not exist", taskToExecute)
+	}
 
-	if wflow.Tasks[taskToExecute].GetType() == Start {
+	if task.GetType() == Start {
 		return NewTaskData(r.Params), nil
 	}
 
