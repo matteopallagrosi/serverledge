@@ -419,7 +419,6 @@ func (wflow *Workflow) initializeOrRetrieveProgress(r *Request) *Progress {
 
 func (wflow *Workflow) savePartialDataForReadyTasks(r *Request, requestId ReqId, progress *Progress, data map[TaskId]*TaskData) error {
 	handledTasks := make(map[TaskId]bool)
-	outputData := make(map[TaskId]TaskData)
 
 	tasksToSave := append(progress.ReadyToExecute, r.NextTasksNotEligible...)
 
@@ -431,7 +430,10 @@ func (wflow *Workflow) savePartialDataForReadyTasks(r *Request, requestId ReqId,
 
 			dataToSave, ok := data[prev]
 			if ok {
-				outputData[prev] = *dataToSave
+				err := dataToSave.Save(requestId, prev)
+				if err != nil {
+					return fmt.Errorf("Could not save partial data: %v", err)
+				}
 			} else {
 				// PD not available locally
 			}
@@ -440,7 +442,6 @@ func (wflow *Workflow) savePartialDataForReadyTasks(r *Request, requestId ReqId,
 		}
 	}
 
-	r.OutputData = outputData
 	return nil
 }
 
@@ -479,17 +480,10 @@ func (wflow *Workflow) Invoke(r *Request) error {
 	var err error
 
 	progress := wflow.initializeOrRetrieveProgress(r)
+	isDataOnEtcd := false
 
 	// Initialize map of TaskData
 	dataMap := make(map[TaskId]*TaskData)
-
-	// Retrieve input data from the request for tasks ready to execute (resuming workflow)
-	if r.InitialData != nil {
-		for task, data := range r.InitialData {
-			dataMap[task] = &data
-		}
-		log.Printf("[Rq-%v] Injected %d pre-loaded task data from resume request", requestId, len(r.InitialData))
-	}
 
 	if len(progress.ReadyToExecute) == 0 {
 		return fmt.Errorf("[Rq-%v] wflow resumed but no task is ready for execution", requestId)
@@ -568,10 +562,15 @@ func (wflow *Workflow) Invoke(r *Request) error {
 				offloadJobId := TaskId(fmt.Sprintf("OFFLOAD_JOB_%v", TasksToOffload[0]))
 				runningTasks[offloadJobId] = true
 
-				dataToOffload := wflow.prepareOffloadData(decision, remoteProgress, dataMap)
+				err = wflow.prepareOffloadData(requestId, decision, remoteProgress, dataMap)
+				if err != nil {
+					return fmt.Errorf("Could not save partial data: %v", err)
+				}
+
+				isDataOnEtcd = true
 
 				go func(jobId TaskId, dec OffloadingDecision) {
-					resultingProgress, nextTasksNotEligible, outputData, errOffload := offload(r, &dec, remoteProgress, dataToOffload)
+					resultingProgress, nextTasksNotEligible, outputData, errOffload := offload(r, &dec, remoteProgress)
 
 					resultChan <- offloadExecutionResult{jobId: jobId, err: errOffload, resultingProgress: resultingProgress, executedPlan: dec.ToExecute, nextTasksNotEligible: nextTasksNotEligible, outputData: outputData}
 				}(offloadJobId, decision)
@@ -618,9 +617,11 @@ func (wflow *Workflow) Invoke(r *Request) error {
 
 			log.Printf("[Rq-%v] Workflow completed", requestId)
 
-			err = DeleteAllTaskData(requestId)
-			if err != nil {
-				log.Printf("Failed to delete task data: %v", err)
+			if isDataOnEtcd {
+				err = DeleteAllTaskData(requestId)
+				if err != nil {
+					log.Printf("Failed to delete task data: %v", err)
+				}
 			}
 
 			return nil
@@ -827,7 +828,7 @@ func (wflow *Workflow) Invoke(r *Request) error {
 	return nil
 }
 
-func offload(r *Request, policyDecision *OffloadingDecision, progress Progress, data map[TaskId]TaskData) (Progress, []TaskId, map[TaskId]TaskData, error) {
+func offload(r *Request, policyDecision *OffloadingDecision, progress Progress) (Progress, []TaskId, map[TaskId]TaskData, error) {
 
 	log.Printf("[Rq-%v] Offloading decision: %v", r.Id, progress.ReadyToExecute)
 
@@ -841,7 +842,6 @@ func offload(r *Request, policyDecision *OffloadingDecision, progress Progress, 
 		},
 		Plan:     policyDecision.OffloadingPlan,
 		Progress: progress,
-		Data:     data,
 	}
 
 	// Update slack for deadline satisfaction
@@ -900,8 +900,7 @@ func offload(r *Request, policyDecision *OffloadingDecision, progress Progress, 
 
 // prepareOffloadData collects the input data needed for the tasks to be offloaded
 // by retrieving the outputs of their predecessor tasks.
-func (wflow *Workflow) prepareOffloadData(plan OffloadingDecision, progress Progress, data map[TaskId]*TaskData) map[TaskId]TaskData {
-	dataToOffload := make(map[TaskId]TaskData)
+func (wflow *Workflow) prepareOffloadData(requestId ReqId, plan OffloadingDecision, progress Progress, data map[TaskId]*TaskData) error {
 	handledTasks := make(map[TaskId]bool)
 
 	for _, task := range plan.ToExecute {
@@ -913,7 +912,10 @@ func (wflow *Workflow) prepareOffloadData(plan OffloadingDecision, progress Prog
 			if progress.Status[prev] == Executed {
 				dataToSave, ok := data[prev]
 				if ok {
-					dataToOffload[prev] = *dataToSave
+					err := dataToSave.Save(requestId, prev)
+					if err != nil {
+						return fmt.Errorf("Could not save partial data: %v", err)
+					}
 				} else {
 					// PD not available locally;
 				}
@@ -923,7 +925,7 @@ func (wflow *Workflow) prepareOffloadData(plan OffloadingDecision, progress Prog
 		}
 	}
 
-	return dataToOffload
+	return nil
 }
 
 // Delete removes the Workflow from cache and from etcd, so it cannot be invoked anymore
@@ -1191,10 +1193,15 @@ func (wflow *Workflow) prepareInput(taskToExecute TaskId, progress *Progress, da
 		parallelResults := make([]interface{}, len(prevTasks))
 
 		for i, prevTask := range prevTasks {
+			var err error
 
 			in, found := dataMap[prevTask]
 			if !found {
-				return nil, fmt.Errorf("partial data not found for task %s", prevTask)
+				in, err = RetrievePartialData(ReqId(r.Id), prevTask)
+				if err != nil {
+					return nil, fmt.Errorf("could not retrieve partial data: %v", err)
+				}
+				log.Printf("[Rq-%v] Data found on etcd for task %v", r.Id, prevTask)
 			} else {
 				log.Printf("[Rq-%v] Data found locally for task %v", r.Id, prevTask)
 			}
@@ -1262,8 +1269,13 @@ func (wflow *Workflow) prepareInput(taskToExecute TaskId, progress *Progress, da
 	if len(prevTasks) == 1 {
 		previousTask := prevTasks[0]
 		input, found := dataMap[previousTask]
+		var err error
 		if !found {
-			return nil, fmt.Errorf("partial data not found for task %s", previousTask)
+			input, err = RetrievePartialData(ReqId(r.Id), previousTask)
+			if err != nil {
+				return nil, fmt.Errorf("could not retrieve partial data: %v", err)
+			}
+			log.Printf("[Rq-%v] Data found on etcd for task %v", r.Id, previousTask)
 		} else {
 			log.Printf("[Rq-%v] Data found locally for task %v", r.Id, previousTask)
 		}
