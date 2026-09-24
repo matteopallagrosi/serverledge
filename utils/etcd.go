@@ -3,10 +3,11 @@ package utils
 import (
 	"context"
 	"fmt"
-	"google.golang.org/grpc/connectivity"
 	"log"
 	"sync"
 	"time"
+
+	"google.golang.org/grpc/connectivity"
 
 	"github.com/serverledge-faas/serverledge/internal/config"
 	clientv3 "go.etcd.io/etcd/client/v3"
@@ -36,8 +37,8 @@ func GetEtcdClient() (*clientv3.Client, error) {
 		Endpoints:   []string{etcdHost},
 		DialTimeout: 3 * time.Second,
 		// Increase limit to 10MB
-		MaxCallSendMsgSize: 10 * 1024 * 1024,
-		MaxCallRecvMsgSize: 10 * 1024 * 1024,
+		MaxCallSendMsgSize: 100 * 1024 * 1024,
+		MaxCallRecvMsgSize: 100 * 1024 * 1024,
 	})
 	if err != nil {
 		log.Printf("Could not connect to etcd: %v", err)
