@@ -24,7 +24,7 @@ type RequestQoS struct {
 }
 
 type ExecutionReport struct {
-	Result         string
+	Result         string  `json:"Result,omitempty"`
 	ResponseTime   float64 // time waited by the user to get the output: completion time - arrival time
 	IsWarmStart    bool
 	InitTime       float64 // time spent sleeping before initializing container

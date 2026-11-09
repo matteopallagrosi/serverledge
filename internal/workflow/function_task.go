@@ -145,6 +145,8 @@ func (s *FunctionTask) exec(compRequest *Request, params ...map[string]interface
 		}
 	}
 
+	report.Result = ""
+
 	// saving execution report for this function
 	compRequest.ExecReport.Reports[CreateExecutionReportId(s)] = report
 
